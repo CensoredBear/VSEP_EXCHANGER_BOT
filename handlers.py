@@ -1912,12 +1912,12 @@ async def cmd_control(message: Message, state: FSMContext = None):
     chat = message.chat
     chat_title = chat.title or chat.full_name or str(chat.id)
     
-    if len(args) >= 2 and args[1].isdigit():
-        # Команда с CRM-номером
+    if len(args) >= 2:
+        # Команда с примечанием (любым текстом после /control)
         crm_number = " ".join(args[1:])
         log_func(f"/control с примечанием: {crm_number}")
     else:
-        # Некорректные параметры
+        # Без примечаний
         crm_number = "-"
         log_func(f"/control без примечаний: {command_text}")
     
