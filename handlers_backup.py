@@ -114,15 +114,18 @@ async def cmd_sos(message: Message):
     user_name = user.full_name
     times = get_bali_and_msk_time_list()
     user_username = f"@{user.username}" if user.username else ""
-    alert_text = (
-        f"🚨 <b>ВНИМАНИЕ!</b>\n\n"
-        f"<b>НАЖАТА КНОПКА 🆘!</b>\n\n"
-        f"от {user_username} в чате <b>{chat_title}</b>\n"
-        f"🕒: {times[6]} (Bali) / {times[5]} (MSK)\n\n"
-        f"<b>S⭕️S - СРОЧНО ОТКРОЙТЕ СООБЩЕНИЕ!</b>\n\n"
+    alert_text = f"""
+🚨🚨🚨 <b>ВНИМАНИЕ! </b> 🚨🚨🚨
 
-        f"Ссылка на сообщение:\n{link}"
-    )
+🆘 🆘 <b>НАЖАТА КНОПКА SOS!</b> 🆘 🆘
+
+от {user_username} в чате <code>{chat_title}</code>
+��: {times[6]} (Bali) / {times[5]} (MSK)
+
+<b><a href='{link}'>S⭕️S - СРОЧНО ОТКРОЙТЕ СООБЩЕНИЕ!</a></b>
+
+🚨🚨🚨
+"""
     await message.bot.send_message(config.ADMIN_GROUP, alert_text, parse_mode="HTML")
     operators = await db.get_operators()
     admins = await db.get_admins()
