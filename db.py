@@ -27,11 +27,17 @@ class Database:
 
     async def execute_query(self, query: str, *args):
         """Выполнение SQL запроса с параметрами"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в execute_query")
+            return None
         async with self.pool.acquire() as conn:
             return await conn.fetch(query, *args)
 
     async def check_system_settings_table(self) -> bool:
         """Проверка существования таблицы system_settings в схеме VSEPExchanger"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в check_system_settings_table")
+            return False
         async with self.pool.acquire() as conn:
             try:
                 # Проверяем существование таблицы
@@ -49,14 +55,21 @@ class Database:
                 return False
 
     async def add_user_if_not_exists(self, user_id: int, nickname: str):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в add_user_if_not_exists")
+            return None
         async with self.pool.acquire() as conn:
             result = await conn.execute('''
                 INSERT INTO "VSEPExchanger"."user" (id, nickneim, registration_date, rang)
                 VALUES ($1, $2, NOW(), 'user')
                 ON CONFLICT (id) DO NOTHING
             ''', user_id, nickname)
+            return result
 
     async def set_user_rank(self, user_id: int, rank: str):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в set_user_rank")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE "VSEPExchanger"."user"
@@ -64,15 +77,21 @@ class Database:
                 WHERE id = $1
             ''', user_id, rank)
 
-    async def get_user_rank(self, user_id: int) -> str:
+    async def get_user_rank(self, user_id: int) -> str | None:
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_user_rank")
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT rang FROM "VSEPExchanger"."user" WHERE id = $1
             ''', user_id)
             return row['rang'] if row else None
 
-    async def get_chat_nickneim(self, chat_id: int) -> str:
+    async def get_chat_nickneim(self, chat_id: int) -> str | None:
         """Получение nickneim чата по его id"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_chat_nickneim")
+            return None
         async with self.pool.acquire() as conn:
             nickneim = await conn.fetchval('''
                 SELECT nickneim FROM "VSEPExchanger"."user" WHERE id = $1 AND rang = 'group'
@@ -80,6 +99,9 @@ class Database:
             return nickneim
 
     async def get_admins(self):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_admins")
+            return None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT nickneim, id, rang FROM "VSEPExchanger"."user" WHERE rang IN ('admin', 'админ', 'superadmin', 'суперадмин')
@@ -87,6 +109,9 @@ class Database:
             return rows
 
     async def get_operators(self):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_operators")
+            return None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT nickneim, id, rang FROM "VSEPExchanger"."user" WHERE rang IN ('operator', 'оператор')
@@ -94,6 +119,9 @@ class Database:
             return rows
 
     async def add_bank_account(self, account_id, bank, card_number, recipient_name, sbp_phone, is_special, is_active, created_by):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в add_bank_account")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO "VSEPExchanger"."bank_account" (
@@ -103,6 +131,9 @@ class Database:
             logger.info(f"Добавлен новый реквизит: account_id={account_id}, bank={bank}, by user_id={created_by}")
 
     async def get_active_bank_accounts(self):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_active_bank_accounts")
+            return None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT * FROM "VSEPExchanger"."bank_account" WHERE is_active = TRUE ORDER BY account_number
@@ -110,6 +141,9 @@ class Database:
             return [dict(row) for row in rows]
 
     async def set_actual_bank_account(self, account_number):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в set_actual_bank_account")
+            return None
         async with self.pool.acquire() as conn:
             # Снимаем статус у всех
             await conn.execute('''
@@ -121,6 +155,9 @@ class Database:
             ''', account_number)
 
     async def set_special_bank_account(self, account_number):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в set_special_bank_account")
+            return None
         async with self.pool.acquire() as conn:
             # Снимаем статус у всех
             await conn.execute('''
@@ -132,6 +169,9 @@ class Database:
             ''', account_number)
 
     async def get_bank_account_by_number(self, account_number):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_bank_account_by_number")
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT * FROM "VSEPExchanger"."bank_account" WHERE account_number = $1
@@ -139,18 +179,27 @@ class Database:
             return dict(row) if row else None
 
     async def remove_bank_account(self, account_number):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в remove_bank_account")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 DELETE FROM "VSEPExchanger"."bank_account" WHERE account_number = $1
             ''', account_number)
 
     async def deactivate_bank_account(self, account_number):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в deactivate_bank_account")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE "VSEPExchanger"."bank_account" SET is_active = FALSE WHERE account_number = $1
             ''', account_number)
 
     async def get_actual_rate(self):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_actual_rate")
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT * FROM "VSEPExchanger"."rate" WHERE is_actual = TRUE LIMIT 1
@@ -158,6 +207,9 @@ class Database:
             return dict(row) if row else None
 
     async def get_rate_coefficients(self):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_rate_coefficients")
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT * FROM "VSEPExchanger"."rate" WHERE id = 1
@@ -165,6 +217,9 @@ class Database:
             return dict(row) if row else None
 
     async def get_rate_limits(self):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_rate_limits")
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT * FROM "VSEPExchanger"."rate" WHERE id = 2
@@ -172,6 +227,9 @@ class Database:
             return dict(row) if row else None
 
     async def add_transaction(self, transaction_number, user_id, created_at, idr_amount, rate_used, rub_amount, note, account_info, status, status_changed_at, log, history=None, source_chat=None, crm_number=None):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в add_transaction")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO "VSEPExchanger"."transactions" (transaction_number, user_id, created_at, idr_amount, rate_used, rub_amount, note, account_info, status, status_changed_at, log, history, source_chat, crm_number)
@@ -179,6 +237,9 @@ class Database:
             ''', transaction_number, user_id, created_at, idr_amount, rate_used, rub_amount, note, account_info, status, status_changed_at, log, history, source_chat, crm_number)
 
     async def get_transaction_by_number(self, transaction_number: str):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_transaction_by_number")
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT * FROM "VSEPExchanger"."transactions" WHERE transaction_number = $1
@@ -186,6 +247,9 @@ class Database:
             return dict(row) if row else None
 
     async def update_transaction_status(self, transaction_number: str, new_status: str, status_changed_at):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в update_transaction_status")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE "VSEPExchanger"."transactions"
@@ -194,24 +258,36 @@ class Database:
             ''', transaction_number, new_status, status_changed_at)
 
     async def update_transaction_history(self, transaction_number, history):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в update_transaction_history")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE "VSEPExchanger"."transactions" SET history = $2 WHERE transaction_number = $1
             ''', transaction_number, history)
 
     async def update_transaction_crm_number(self, transaction_number, crm_number):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в update_transaction_crm_number")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE "VSEPExchanger"."transactions" SET crm_number = $2 WHERE transaction_number = $1
             ''', transaction_number, crm_number)
 
     async def update_transaction_note(self, transaction_number, note):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в update_transaction_note")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE "VSEPExchanger"."transactions" SET note = $2 WHERE transaction_number = $1
             ''', transaction_number, note)
 
     async def get_group_chats(self):
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_group_chats")
+            return None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT id, nickneim FROM "VSEPExchanger"."user" WHERE rang = 'group'
@@ -220,6 +296,9 @@ class Database:
 
     async def set_system_setting(self, key: str, value: str):
         """Установка значения системной настройки"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в set_system_setting")
+            return None
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO "VSEPExchanger".system_settings (key, value)
@@ -228,8 +307,11 @@ class Database:
             ''', key, value)
             logger.info(f"SYSTEM | Обновлена системная настройка: {key}={value}")
 
-    async def get_system_setting(self, key: str) -> str:
+    async def get_system_setting(self, key: str) -> str | None:
         """Получение значения системной настройки"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_system_setting")
+            return None
         async with self.pool.acquire() as conn:
             value = await conn.fetchval('''
                 SELECT value FROM "VSEPExchanger".system_settings
@@ -240,6 +322,9 @@ class Database:
 
     async def toggle_system_setting(self, key: str) -> bool:
         """Переключение булевой системной настройки (true/false)"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в toggle_system_setting")
+            return False
         async with self.pool.acquire() as conn:
             # Получаем текущее значение
             current_value = await conn.fetchval('''
@@ -265,8 +350,11 @@ class Database:
             logger.info(f"SYSTEM | Переключена системная настройка: {key}={new_value}")
             return new_value.lower() == "true"
 
-    async def get_all_system_settings(self) -> dict:
+    async def get_all_system_settings(self) -> dict | None:
         """Получение всех системных настроек"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_all_system_settings")
+            return None
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT key, value FROM "VSEPExchanger".system_settings;
@@ -275,6 +363,9 @@ class Database:
 
     async def migrate_photo_to_video_ids(self):
         """Миграция ключей photo_id на video_id"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в migrate_photo_to_video_ids")
+            return None
         async with self.pool.acquire() as conn:
             # Получаем текущие значения
             photo_start = await conn.fetchval('''
@@ -311,6 +402,9 @@ class Database:
 
     async def ensure_system_settings(self):
         """Проверка и установка значений по умолчанию для системных настроек"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в ensure_system_settings")
+            return None
         default_settings = {
             'shift_start_time': '09:00',
             'shift_end_time': '23:00',
@@ -354,6 +448,9 @@ class Database:
 
     async def get_all_control_counters(self):
         """Получить все счетчики контроля по всем чатам"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_all_control_counters")
+            return None
         async with self.pool.acquire() as conn:
             # Получаем все ключи, которые заканчиваются на _control_counter
             rows = await conn.fetch('''
@@ -388,8 +485,11 @@ class Database:
             counters.sort(key=lambda x: x['counter'], reverse=True)
             return counters
 
-    async def get_chat_title(self, chat_id: int) -> str:
+    async def get_chat_title(self, chat_id: int) -> str | None:
         """Получить название чата по его ID"""
+        if self.pool is None:
+            logger.error("Попытка обращения к БД без подключения (pool=None) в get_chat_title")
+            return None
         async with self.pool.acquire() as conn:
             # Пытаемся найти чат в таблице user
             row = await conn.fetchrow('''
@@ -397,10 +497,8 @@ class Database:
                 FROM "VSEPExchanger"."user" 
                 WHERE id = $1
             ''', chat_id)
-            
             if row and row['nickneim']:
                 return row['nickneim']
-            
             return None
 
 db = Database() 

@@ -39,17 +39,17 @@ def get_bali_and_msk_time_list():
 
 async def send_message(
     bot: Bot,
-    chat_id: int,
-    text: str = None,
+    chat_id: int | None = None,
+    text: str | None = None,
     *,
-    reply_to_message_id: int = None,
-    message_thread_id: int = None,
+    reply_to_message_id: int | None = None,
+    message_thread_id: int | None = None,
     parse_mode: ParseMode = ParseMode.HTML,
     reply_markup: ReplyKeyboardMarkup | InlineKeyboardMarkup = None,
-    delete_after: int = None,
-    delay: int = None,
-    forward_from_chat_id: int = None,
-    forward_message_id: int = None,
+    delete_after: int | None = None,
+    delay: int | None = None,
+    forward_from_chat_id: int | None = None,
+    forward_message_id: int | None = None,
     **kwargs
 ) -> TgMessage | None:
     """
@@ -67,18 +67,18 @@ async def send_message(
         await asyncio.sleep(delay)
     if forward_from_chat_id and forward_message_id:
         msg = await bot.forward_message(
-            chat_id,
-            forward_from_chat_id,
-            forward_message_id,
-            message_thread_id=message_thread_id,
+            chat_id if chat_id is not None else 0,
+            forward_from_chat_id if forward_from_chat_id is not None else 0,
+            forward_message_id if forward_message_id is not None else 0,
+            message_thread_id=message_thread_id if message_thread_id is not None else 0,
             **kwargs
         )
     else:
         msg = await bot.send_message(
-            chat_id,
-            text,
-            reply_to_message_id=reply_to_message_id,
-            message_thread_id=message_thread_id,
+            chat_id if chat_id is not None else 0,
+            text or '',
+            reply_to_message_id=reply_to_message_id if reply_to_message_id is not None else 0,
+            message_thread_id=message_thread_id if message_thread_id is not None else 0,
             parse_mode=parse_mode,
             reply_markup=reply_markup,
             **kwargs
@@ -87,10 +87,10 @@ async def send_message(
         asyncio.create_task(_auto_delete(bot, chat_id, msg.message_id, delete_after))
     return msg
 
-async def _auto_delete(bot: Bot, chat_id: int, message_id: int, delay: int):
-    await asyncio.sleep(delay)
+async def _auto_delete(bot: Bot, chat_id: int | None, message_id: int | None, delay: int | None):
+    await asyncio.sleep(delay or 0)
     try:
-        await bot.delete_message(chat_id, message_id)
+        await bot.delete_message(chat_id if chat_id is not None else 0, message_id if message_id is not None else 0)
         # Логируем удаление
         print(f"[автоудалено] id={message_id}")
     except Exception:
@@ -186,21 +186,21 @@ def get_control_no_attachment_message() -> str:
 
 def get_shift_time_message():
     """Получение сообщения о времени смены"""
-    return f"Время работы: {system_settings.shift_start_time} - {system_settings.shift_end_time}"
+    return f"Время работы: {system_settings.shift_start_time or ''} - {system_settings.shift_end_time or ''}"
 
 def get_shift_start_message():
     """Получение сообщения о начале смены"""
-    return f"Смена начинается в {system_settings.shift_start_time}"
+    return f"Смена начинается в {system_settings.shift_start_time or ''}"
 
 def get_shift_end_message():
     """Получение сообщения о конце смены"""
-    return f"Смена заканчивается в {system_settings.shift_end_time}"
+    return f"Смена заканчивается в {system_settings.shift_end_time or ''}"
 
 def get_night_shift_message():
     """Получение сообщения о ночной смене"""
     return (
         f"⚠️ <b>НОЧНАЯ СМЕНА</b> 🌙\n\n"
-        f"В период с {system_settings.shift_end_time} до {system_settings.shift_start_time} "
+        f"В период с {system_settings.shift_end_time or ''} до {system_settings.shift_start_time or ''} "
         f"ответы на заявки — информационные: бот не выдаёт реквизиты, заявки не попадают в базу "
         f"и не могут быть оплачены."
     ) 

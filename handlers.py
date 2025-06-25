@@ -167,6 +167,13 @@ async def rate_change_confirm(call: CallbackQuery, state: FSMContext):
         return
     new_rate = float(data['new_rate'])
     coefs = await db.get_rate_coefficients()
+    
+    # Проверяем, что коэффициенты получены
+    if not coefs:
+        await call.message.edit_text("❌ Ошибка: не удалось получить коэффициенты курсов. Попробуйте позже.")
+        await state.clear()
+        return
+    
     main_coef = float(coefs['main_rate'])
     rate1 = new_rate * float(coefs['rate1']) / main_coef
     rate2 = new_rate * float(coefs['rate2']) / main_coef
@@ -176,6 +183,13 @@ async def rate_change_confirm(call: CallbackQuery, state: FSMContext):
     old_rate_row = await db.get_actual_rate()
     old_rate_special = old_rate_row['rate_special'] if old_rate_row else None
     rate_special = old_rate_special
+    
+    # Проверяем, что пул базы данных доступен
+    if not db.pool:
+        await call.message.edit_text("❌ Ошибка: база данных недоступна. Попробуйте позже.")
+        await state.clear()
+        return
+    
     await db.pool.execute('UPDATE "VSEPExchanger"."rate" SET is_actual=FALSE WHERE is_actual=TRUE')
     await db.pool.execute('''
         INSERT INTO "VSEPExchanger"."rate" (main_rate, rate1, rate2, rate3, rate4, rate_back, rate_special, created_by, created_at, is_actual)
@@ -223,16 +237,23 @@ async def process_control_request(message: Message, crm_number: str):
     try:
         # Получаем список операторов
         operators = await db.get_operators()
+        if not operators:
+            await message.reply("❌ Нет активных операторов для контроля.")
+            return
         log_func(f"Получен список операторов: {len(operators)}")
         
         # Счетчик контроля для текущего чата
         counter = await db.get_control_counter(chat_id)
+        if counter is None:
+            counter = 0
         new_counter = counter + 1
         await db.set_control_counter(chat_id, new_counter)
         log_func(f"Счетчик контроля для чата {chat_id} увеличен: {counter} -> {new_counter}")
         
         # Получаем все счетчики контроля по всем чатам
         all_counters = await db.get_all_control_counters()
+        if not all_counters:
+            all_counters = []
         log_func(f"Получены счетчики контроля: {len(all_counters)} чатов")
         
         # Формируем текст уведомления
@@ -250,18 +271,20 @@ async def process_control_request(message: Message, crm_number: str):
         for chat_counter in all_counters:
             if chat_counter['counter'] > 0:  # Показываем только чаты с счетчиком > 0
                 counter_emoji = "🟨" if chat_counter['counter'] == 1 else "🟥" * chat_counter['counter']
-                counter_lines.append(f"{counter_emoji} Счетчик контроля ({chat_counter['chat_title']}): {chat_counter['counter']}")
+                counter_lines.append(f"{counter_emoji} Счетчик контроля <code>{chat_counter['chat_title']}</code>: {chat_counter['counter']}")
         
         counters_text = "\n".join(counter_lines) if counter_lines else "Нет активных счетчиков контроля"
         
-        notify_text = f"""<b>⚠️⚠️⚠️ ВНИМАНИЮ ОПЕРАТОРОВ:</b> 👨‍💻 {operators_text}
+        notify_text = f"""<b>⚠️⚠️⚠️ ВНИМАНИЮ ОПЕРАТОРОВ:</b> 
+👨‍💻 {operators_text}
 
-⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b> из чата: <code>{chat_title}</code>
-🔗 <b>Ссылка:</b> <a href='{link}'>Перейти к сообщению</a>
+⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b>
+    из чата: <code>{chat_title}</code>
 👤 <b>Автор:</b> <code>{user_nick}</code>
+🔗 <b>Ссылка:</b> <a href='{link}'>Перейти к сообщению</a>
+
 📝 <b>Примечание:</b> <code>{crm_number}</code>
 
-<b>📊 Счетчики контроля по чатам:</b>
 {counters_text}
 """
         
@@ -363,6 +386,9 @@ async def report_callback_handler(call: CallbackQuery):
              link = f"https://t.me/c/{chat_id_num}/{msg_id}"
          
          # Получаем все ордера со статусом accept для этого чата
+         if not db.pool:
+             await call.answer("Ошибка: база данных недоступна.", show_alert=True)
+             return
          async with db.pool.acquire() as conn:
              rows = await conn.fetch('''
                  SELECT transaction_number, rub_amount, idr_amount
@@ -390,7 +416,7 @@ async def report_callback_handler(call: CallbackQuery):
              
              # Получаем текущую историю
              transaction = await db.get_transaction_by_number(transaction_number)
-             old_history = transaction.get('history', '')
+             old_history = transaction.get('history', '') if transaction else ''
              new_entry = f"{now_str}&{user_nick}&bill&{link}"
              history = old_history + "%%%" + new_entry if old_history else new_entry
              
@@ -466,7 +492,11 @@ async def cmd_sos(message: Message):
     await send_to_admin_group_safe(message.bot, alert_text)
     
     operators = await db.get_operators()
+    if not operators:
+        operators = []
     admins = await db.get_admins()
+    if not admins:
+        admins = []
     superadmins = [u for u in admins if u.get('rang') == 'superadmin']
     user_ids = set()
     for u in operators + admins:
@@ -557,7 +587,7 @@ async def cmd_accept(message: Message):
 ✅ Платёж  ❯❯❯❯ {rub_fmt} RUB ({idr_fmt} IDR)
 
 <i>отправленный на реквизиты:</i> 
-<blockquote><i?{acc_info}</i></blockquote>
+<blockquote><i>{acc_info}</i></blockquote>
     
 ✅ ПОДТВЕРЖДЕН Представителем Сервиса {user_username}
 🕒 время подтверждения: {confirm_time} (Bali)
@@ -713,46 +743,51 @@ async def cmd_rate_show(message: Message):
         lines.append(code('-' * (coln1 + coln2 + coln4 + coln5)))
 
         # Строки с курсами
+        if not limits or not rate or not coefs:
+            await message.reply("❌ Ошибка: не удалось получить курсы или лимиты. Попробуйте позже.")
+            return
+        def safe_get(d, key, default="—"):
+            return d[key] if d and key in d and d[key] is not None else default
         lines.append(
             '0'.ljust(coln1) +
-            fmt_0(limits['main_rate']).ljust(coln2) +
-            fmt_2(rate['main_rate']).ljust(coln4) +
-            fmt_delta(coefs['main_rate']).ljust(coln5)
+            fmt_0(safe_get(limits, 'main_rate')).ljust(coln2) +
+            fmt_2(safe_get(rate, 'main_rate')).ljust(coln4) +
+            fmt_delta(safe_get(coefs, 'main_rate')).ljust(coln5)
         )
         lines.append(
-            fmt_0(limits['main_rate']).ljust(coln1) +
-            fmt_0(limits['rate1']).ljust(coln2) +
-            fmt_2(rate['rate1']).ljust(coln4) +
-            fmt_delta(coefs['rate1']).ljust(coln5)
+            fmt_0(safe_get(limits, 'main_rate')).ljust(coln1) +
+            fmt_0(safe_get(limits, 'rate1')).ljust(coln2) +
+            fmt_2(safe_get(rate, 'rate1')).ljust(coln4) +
+            fmt_delta(safe_get(coefs, 'rate1')).ljust(coln5)
         )
         lines.append(
-            fmt_0(limits['rate1']).ljust(coln1) +
-            fmt_0(limits['rate2']).ljust(coln2) +
-            fmt_2(rate['rate2']).ljust(coln4) +
-            fmt_delta(coefs['rate2']).ljust(coln5)
+            fmt_0(safe_get(limits, 'rate1')).ljust(coln1) +
+            fmt_0(safe_get(limits, 'rate2')).ljust(coln2) +
+            fmt_2(safe_get(rate, 'rate2')).ljust(coln4) +
+            fmt_delta(safe_get(coefs, 'rate2')).ljust(coln5)
         )
         lines.append(
-            fmt_0(limits['rate2']).ljust(coln1) +
-            fmt_0(limits['rate3']).ljust(coln2) +
-            fmt_2(rate['rate3']).ljust(coln4) +
-            fmt_delta(coefs['rate3']).ljust(coln5)
+            fmt_0(safe_get(limits, 'rate2')).ljust(coln1) +
+            fmt_0(safe_get(limits, 'rate3')).ljust(coln2) +
+            fmt_2(safe_get(rate, 'rate3')).ljust(coln4) +
+            fmt_delta(safe_get(coefs, 'rate3')).ljust(coln5)
         )
         lines.append(
-            fmt_0(limits['rate3']).ljust(coln1) +
+            fmt_0(safe_get(limits, 'rate3')).ljust(coln1) +
             '∞'.ljust(coln2) +
-            fmt_2(rate['rate4']).ljust(coln4) +
-            fmt_delta(coefs['rate4']).ljust(coln5)
+            fmt_2(safe_get(rate, 'rate4')).ljust(coln4) +
+            fmt_delta(safe_get(coefs, 'rate4')).ljust(coln5)
         )
         # Обратный курс и спец. лимит
         lines.append('')
         lines.append(
             code('Обратный курс (возврат)....').ljust(coln1 + coln2) +
-            fmt_2(rate['rate_back']).ljust(coln4) +
-            fmt_delta(coefs['rate_back']).ljust(coln5)
+            fmt_2(safe_get(rate, 'rate_back')).ljust(coln4) +
+            fmt_delta(safe_get(coefs, 'rate_back')).ljust(coln5)
         )
         lines.append(
             code('Специальные реквизиты от...').ljust(coln1 + coln2) +
-            code(fmt_0(rate['rate_special']) + ' руб').ljust(coln4) +
+            code(fmt_0(safe_get(rate, 'rate_special')) + ' руб').ljust(coln4) +
             ' '.ljust(coln5)
         )
 
@@ -760,8 +795,12 @@ async def cmd_rate_show(message: Message):
         user_id = rate.get("created_by")
         from_user = "—"
         if user_id:
-            admins = await db.get_admins()
-            operators = await db.get_operators()
+            admins = await db.get_admins() or []
+            if not admins:
+                admins = []
+            operators = await db.get_operators() or []
+            if not operators:
+                operators = []
             users = {str(u['id']): u['nickneim'] for u in list(admins) + list(operators)}
             from_user = users.get(str(user_id), f"id{user_id}")
 
@@ -794,7 +833,7 @@ async def cmd_admin_show(message: Message):
         await message.reply("Команда доступна только супер-админу.")
         logger.warning(f"{message.from_user.id} попытался вызвать /admin_show без прав superadmin")
         return
-    admins = await db.get_admins()
+    admins = await db.get_admins() or []
     if not admins:
         await message.reply("В базе нет админов.")
         return
@@ -855,7 +894,7 @@ async def admin_add_confirm_callback(call: CallbackQuery):
         if call.message.reply_to_message and call.message.reply_to_message.from_user.id == user_id:
             username = call.message.reply_to_message.from_user.username or call.message.reply_to_message.from_user.full_name or f"id{user_id}"
         else:
-            admins = await db.get_admins()
+            admins = await db.get_admins() or []
             for row in admins:
                 if row['id'] == user_id:
                     username = row['nickneim']
@@ -920,7 +959,7 @@ async def admin_remove_confirm_callback(call: CallbackQuery):
         if call.message.reply_to_message and call.message.reply_to_message.from_user.id == user_id:
             username = call.message.reply_to_message.from_user.username or call.message.reply_to_message.from_user.full_name or f"id{user_id}"
         else:
-            admins = await db.get_admins()
+            admins = await db.get_admins() or []
             for row in admins:
                 if row['id'] == user_id:
                     username = row['nickneim']
@@ -992,7 +1031,7 @@ async def operator_add_confirm_callback(call: CallbackQuery):
         if call.message.reply_to_message and call.message.reply_to_message.from_user.id == user_id:
             username = call.message.reply_to_message.from_user.username or call.message.reply_to_message.from_user.full_name or f"id{user_id}"
         else:
-            ops = await db.get_operators()
+            ops = await db.get_operators() or []
             for row in ops:
                 if row['id'] == user_id:
                     username = row['nickneim']
@@ -1058,7 +1097,7 @@ async def operator_remove_confirm_callback(call: CallbackQuery):
         if call.message.reply_to_message and call.message.reply_to_message.from_user.id == user_id:
             username = call.message.reply_to_message.from_user.username or call.message.reply_to_message.from_user.full_name or f"id{user_id}"
         else:
-            ops = await db.get_operators()
+            ops = await db.get_operators() or []
             for row in ops:
                 if row['id'] == user_id:
                     username = row['nickneim']
@@ -1086,7 +1125,7 @@ async def cmd_operator_show(message: Message):
         await message.reply("Команда доступна только админам и супер-админам.")
         logger.warning(f"{message.from_user.id} попытался вызвать /operator_show без прав admin/superadmin")
         return
-    ops = await db.get_operators()
+    ops = await db.get_operators() or []
     if not ops:
         await message.reply("В базе нет операторов.")
         return
@@ -1309,6 +1348,9 @@ async def cmd_transfer(message: Message):
 
     chat_id = message.chat.id
     # Получаем все ордера со статусом bill для этого чата
+    if not db.pool:
+        await progress_msg.edit_text("Ошибка: база данных недоступна.")
+        return
     async with db.pool.acquire() as conn:
         rows = await conn.fetch('''
             SELECT transaction_number, rub_amount, idr_amount, status
@@ -1362,7 +1404,9 @@ async def cmd_transfer(message: Message):
     for row in rows:
         transaction_number = row['transaction_number']
         transaction = await db.get_transaction_by_number(transaction_number)
-        old_history = transaction.get('history', '')
+        if not transaction:
+            continue  # если транзакция не найдена, пропускаем
+        old_history = transaction.get('history', '') if transaction else ''
         new_entry = f"{now_str}&{user_nick}&accounted&{link}"
         history = old_history + "%%%" + new_entry if old_history else new_entry
         
@@ -1377,13 +1421,13 @@ async def cmd_transfer(message: Message):
             user_nick,
             row['idr_amount'],
             row['rub_amount'],
-            transaction.get('used_rate', 0),
+            transaction.get('used_rate', 0) if transaction else 0,
             'accounted',
-            transaction.get('note', ''),
-            transaction.get('acc_info', ''),
+            transaction.get('note', '') if transaction else '',
+            transaction.get('acc_info', '') if transaction else '',
             history,
             str(chat_id),
-            transaction.get('created_at', now_utc),
+            transaction.get('created_at', now_utc) if transaction else now_utc,
             now_utc  # дата выполнения /transfer
         ]
         gsheet_rows.append(gsheet_row)
@@ -1439,16 +1483,19 @@ async def rate_change_input(message: Message, state: FSMContext):
     
     # Получаем текущие коэффициенты
     coefs = await db.get_rate_coefficients()
-    main_coef = float(coefs['main_rate'])
-    rate1 = new_rate * float(coefs['rate1']) / main_coef
-    rate2 = new_rate * float(coefs['rate2']) / main_coef
-    rate3 = new_rate * float(coefs['rate3']) / main_coef
-    rate4 = new_rate * float(coefs['rate4']) / main_coef
-    rate_back = new_rate * float(coefs['rate_back']) / main_coef
+    if not coefs:
+        await message.reply("❌ Ошибка: не удалось получить коэффициенты курса.")
+        return
+    main_coef = float(coefs['main_rate']) if 'main_rate' in coefs and coefs['main_rate'] is not None else 1
+    rate1 = new_rate * float(coefs['rate1']) / main_coef if 'rate1' in coefs and coefs['rate1'] is not None else 0
+    rate2 = new_rate * float(coefs['rate2']) / main_coef if 'rate2' in coefs and coefs['rate2'] is not None else 0
+    rate3 = new_rate * float(coefs['rate3']) / main_coef if 'rate3' in coefs and coefs['rate3'] is not None else 0
+    rate4 = new_rate * float(coefs['rate4']) / main_coef if 'rate4' in coefs and coefs['rate4'] is not None else 0
+    rate_back = new_rate * float(coefs['rate_back']) / main_coef if 'rate_back' in coefs and coefs['rate_back'] is not None else 0
     
     # Получаем текущий курс
     old_rate_row = await db.get_actual_rate()
-    old_rate = old_rate_row['main_rate'] if old_rate_row else 0
+    old_rate = old_rate_row['main_rate'] if old_rate_row and 'main_rate' in old_rate_row and old_rate_row['main_rate'] is not None else 0
     
     # Сохраняем в состояние
     await state.update_data(new_rate=new_rate)
@@ -1489,7 +1536,7 @@ async def send_startup_message(bot: Bot):
     """🟡 Запуск бота"""
     try:
         message = "🤖 VSEP Бот запущен и готов к работе!"
-        await send_to_admin_group_safe(bot, message, parse_mode=None)
+        await send_to_admin_group_safe(bot, message, parse_mode="HTML")
         logger.info("Отправлено сообщение о запуске бота в админскую группу")
     except Exception as e:
         logger.error(f"Ошибка при отправке сообщения о запуске: {e}")
@@ -1742,23 +1789,37 @@ async def cmd_status(message: Message):
         logger.info(f"[STATUS] Подключение к БД подтверждено, выполняем запрос...")
         
         # Получаем открытые заявки
+        if not db.pool:
+            await message.reply("Ошибка: база данных недоступна.")
+            return
         async with db.pool.acquire() as conn:
-            logger.info(f"[STATUS] Соединение с БД получено, выполняем SQL запрос...")
-            rows = await conn.fetch('''
+            created_rows = await conn.fetch('''
                 SELECT transaction_number, rub_amount, idr_amount
                 FROM "VSEPExchanger"."transactions"
                 WHERE source_chat = $1 AND status = 'created'
-                ORDER BY created_at
+                ORDER BY status_changed_at
             ''', str(chat_id))
             
-            logger.info(f"[STATUS] Получено {len(rows)} открытых заявок из БД для чата {chat_id}")
-        
-        if not rows:
+            accept_rows = await conn.fetch('''
+                SELECT transaction_number, rub_amount, idr_amount
+                FROM "VSEPExchanger"."transactions"
+                WHERE source_chat = $1 AND status = 'accept'
+                ORDER BY status_changed_at
+            ''', str(chat_id))
+            
+            bill_rows = await conn.fetch('''
+                SELECT transaction_number, rub_amount, idr_amount
+                FROM "VSEPExchanger"."transactions"
+                WHERE source_chat = $1 AND status = 'bill'
+                ORDER BY status_changed_at
+            ''', str(chat_id))
+
+        if not created_rows and not accept_rows and not bill_rows:
             logger.info(f"[STATUS] В чате {chat_id} нет открытых заявок")
             await message.reply("📊 <b>Открытые заявки</b>\n\nВ этом чате нет открытых заявок.")
             return
         
-        logger.info(f"[STATUS] Начинаем формирование отчета для {len(rows)} заявок...")
+        logger.info(f"[STATUS] Начинаем формирование отчета для {len(created_rows)} заявок...")
         
         # Формируем таблицу
         col1 = 15
@@ -1772,7 +1833,23 @@ async def cmd_status(message: Message):
         total_rub = 0
         total_idr = 0
         
-        for row in rows:
+        for row in created_rows:
+            num = str(row['transaction_number'])
+            rub = int(row['rub_amount']) if row['rub_amount'] else 0
+            idr = int(row['idr_amount']) if row['idr_amount'] else 0
+            lines.append(f"<code>{num.ljust(col1)}{fmt_0(rub).rjust(col2)}{fmt_0(idr).rjust(col3)}</code>")
+            total_rub += rub
+            total_idr += idr
+        
+        for row in accept_rows:
+            num = str(row['transaction_number'])
+            rub = int(row['rub_amount']) if row['rub_amount'] else 0
+            idr = int(row['idr_amount']) if row['idr_amount'] else 0
+            lines.append(f"<code>{num.ljust(col1)}{fmt_0(rub).rjust(col2)}{fmt_0(idr).rjust(col3)}</code>")
+            total_rub += rub
+            total_idr += idr
+        
+        for row in bill_rows:
             num = str(row['transaction_number'])
             rub = int(row['rub_amount']) if row['rub_amount'] else 0
             idr = int(row['idr_amount']) if row['idr_amount'] else 0
@@ -1782,10 +1859,10 @@ async def cmd_status(message: Message):
         
         table = header + '\n'.join(lines)
         table += f"\n<code>{'-'*(col1+col2+col3)}</code>"
-        table += f"\n<code>Итого: {len(rows):<5}{fmt_0(total_rub).rjust(col2)}{fmt_0(total_idr).rjust(col3)}</code>"
+        table += f"\n<code>Итого: {len(created_rows) + len(accept_rows) + len(bill_rows):<5}{fmt_0(total_rub).rjust(col2)}{fmt_0(total_idr).rjust(col3)}</code>"
         
         await message.reply(table, parse_mode="HTML")
-        logger.info(f"[STATUS] Отчет отправлен: {len(rows)} заявок, RUB={total_rub}, IDR={total_idr}")
+        logger.info(f"[STATUS] Отчет отправлен: {len(created_rows) + len(accept_rows) + len(bill_rows)} заявок, RUB={total_rub}, IDR={total_idr}")
         
     except Exception as e:
         logger.error(f"[STATUS] Ошибка при формировании отчета: {e}")
@@ -1958,6 +2035,9 @@ async def cmd_report(message: Message):
     log_func(f"Начало обработки команды /report")
 
     # Получаем все ордера для этого чата с разными статусами
+    if not db.pool:
+        await message.reply("Ошибка: база данных недоступна.")
+        return
     async with db.pool.acquire() as conn:
         created_rows = await conn.fetch('''
             SELECT transaction_number, rub_amount, idr_amount
