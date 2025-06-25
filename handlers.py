@@ -540,13 +540,14 @@ async def cmd_accept(message: Message):
     except Exception:
         idr_fmt = str(idr)
     caption = (f'''
-✅ Платёж по заявке {transaction_number}
-   ❯❯❯❯ {rub_fmt} RUB ({idr_fmt} IDR)
-отправленный на реквизиты: 
-<blockquote>{acc_info}</blockquote>
+✅ Платёж  ❯❯❯❯ {rub_fmt} RUB ({idr_fmt} IDR)
+
+<i>отправленный на реквизиты:</i> 
+<blockquote><i?{acc_info}</i></blockquote>
     
 ✅ ПОДТВЕРЖДЕН Представителем Сервиса {user_username}
-🕒 время подтверждения: {confirm_time} (Bali)''')
+🕒 время подтверждения: {confirm_time} (Bali)
+🔵 заявка {transaction_number}''')
     # # --- Формируем ответ с вложением, если оно есть ---
     # control_media = None
     # control_caption = None
