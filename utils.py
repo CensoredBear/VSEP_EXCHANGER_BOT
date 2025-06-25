@@ -5,18 +5,18 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup
 from pydantic import ValidationError
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 
 from logger import logger
 
 async def safe_send_media_with_caption(
     bot: Bot, 
     chat_id: Union[int, str], 
-    file_id: Dict[str, str], 
+    file_id: Optional[Dict[str, str]], 
     caption: str, 
     parse_mode: str = 'HTML', 
     reply_markup: InlineKeyboardMarkup = None,
-    reply_to_message_id: int = None
+    reply_to_message_id: Optional[int] = None
 ):
     """
     Tries to send a media file by file_id, first as video, then as photo.

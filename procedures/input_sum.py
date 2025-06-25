@@ -126,10 +126,10 @@ async def handle_input_sum(message: TgMessage):
         month = now.strftime('%m')
         hour = now.strftime('%H')
         minute = now.strftime('%M')
-        ms = f"{now.microsecond // 1000:03d}"
-        user_id_str = str(user.id)[-3:].zfill(3)
-        msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-        transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+        # Получаем никнейм чата для формирования номера заявки
+        nickneim = await db.get_chat_nickneim(chat.id)
+        nick3 = (nickneim[:3].upper() if nickneim else "NON")
+        transaction_number = f"{day}{month}{hour}{minute}{nick3}{message.message_id}"
         created_at = naive_now
         status = "night"
         status_changed_at = naive_now
@@ -207,7 +207,7 @@ async def handle_input_sum(message: TgMessage):
         await safe_send_media_with_caption(
             bot=message.bot,
             chat_id=message.chat.id,
-            file_id=final_media_night,
+            file_id=final_media_night if final_media_night else None,
             caption=final_msg_night,
             reply_to_message_id=message.message_id
         )
@@ -244,7 +244,7 @@ async def handle_input_sum(message: TgMessage):
             cat = 0
             rub_amount = round(abs(idr_amount) / used_rate)
             # Для возврата всегда используются актуальные реквизиты
-            accounts = [acc for acc in await db.get_active_bank_accounts() if acc.get('is_actual')]
+            accounts = [acc for acc in (await db.get_active_bank_accounts() or []) if acc.get('is_actual')]
             acc_text = "\n".join([
                 f"▪️ {a['bank']} {a['card_number']} {a['recipient_name']} {a['sbp_phone']}" for a in accounts
             ])
@@ -258,10 +258,10 @@ async def handle_input_sum(message: TgMessage):
             month = now.strftime('%m')
             hour = now.strftime('%H')
             minute = now.strftime('%M')
-            ms = f"{now.microsecond // 1000:03d}"
-            user_id_str = str(user.id)[-3:].zfill(3)
-            msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-            transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+            # Получаем никнейм чата для формирования номера заявки
+            nickneim = await db.get_chat_nickneim(chat.id)
+            nick3 = (nickneim[:3].upper() if nickneim else "NON")
+            transaction_number = f"{day}{month}{hour}{minute}{nick3}{message.message_id}"
             created_at = naive_now
             status = "created"
             status_changed_at = naive_now
@@ -340,7 +340,7 @@ async def handle_input_sum(message: TgMessage):
             await safe_send_media_with_caption(
                 bot=message.bot,
                 chat_id=message.chat.id,
-                file_id=final_media_return,
+                file_id=final_media_return if final_media_return else None,
                 caption=final_msg_return,
                 reply_to_message_id=message.message_id
             )
@@ -379,11 +379,11 @@ async def handle_input_sum(message: TgMessage):
         
         # --- Логика выбора реквизитов в зависимости от суммы ---
         if idr_amount > limits_idr[-1]: # Сумма выше последнего лимита
-            accounts = [acc for acc in await db.get_active_bank_accounts() if acc.get('is_special')]
+            accounts = [acc for acc in (await db.get_active_bank_accounts() or []) if acc.get('is_special')]
             spec_text = "<b>(спец. реквизиты)</b>"
             logger.info(f"[SUMMA_CALC] Сумма {idr_amount} выше последнего лимита, выбраны спец. реквизиты.")
         else: # Сумма в пределах лимитов
-            accounts = [acc for acc in await db.get_active_bank_accounts() if acc.get('is_actual')]
+            accounts = [acc for acc in (await db.get_active_bank_accounts() or []) if acc.get('is_actual')]
             spec_text = ""
             logger.info(f"[SUMMA_CALC] Сумма {idr_amount} в пределах лимитов, выбраны актуальные реквизиты.")
 
@@ -399,10 +399,10 @@ async def handle_input_sum(message: TgMessage):
         month = now.strftime('%m')
         hour = now.strftime('%H')
         minute = now.strftime('%M')
-        ms = f"{now.microsecond // 1000:03d}"
-        user_id_str = str(user.id)[-3:].zfill(3)
-        msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-        transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+        # Получаем никнейм чата для формирования номера заявки
+        nickneim = await db.get_chat_nickneim(chat.id)
+        nick3 = (nickneim[:3].upper() if nickneim else "NON")
+        transaction_number = f"{day}{month}.{hour}{minute}.{nick3}.{message.message_id}"
         created_at = naive_now
         status = "created"
         status_changed_at = naive_now
@@ -495,7 +495,7 @@ async def handle_input_sum(message: TgMessage):
         await safe_send_media_with_caption(
             bot=message.bot,
             chat_id=message.chat.id,
-            file_id=final_media,
+            file_id=final_media if final_media else None,
             caption=final_msg,
             reply_to_message_id=message.message_id
         )
@@ -505,19 +505,20 @@ async def handle_input_sum(message: TgMessage):
         # --- Информационное сообщение ---
         company_name = ""
         try:
-            group_row = await db.pool.fetchrow(
-                'SELECT nickneim FROM "VSEPExchanger"."user" WHERE rang = $1 AND id = $2',
-                'group', message.chat.id
-            )
-            if group_row and group_row['nickneim']:
-                nick = group_row['nickneim']
-                logger.info(f"[COMPANY_NAME] Original nick: {nick}")
-                if '_' in nick:
-                    parts = nick.split('_', 1)
-                    company_name = parts[1].strip() if len(parts) > 1 else nick.strip()
-                else:
-                    company_name = nick.strip()
-                    logger.info(f"[COMPANY_NAME] No dash, company_name: {company_name}")
+            if db.pool is not None:
+                group_row = await db.pool.fetchrow(
+                    'SELECT nickneim FROM "VSEPExchanger"."user" WHERE rang = $1 AND id = $2',
+                    'group', message.chat.id
+                )
+                if group_row and group_row['nickneim']:
+                    nick = group_row['nickneim']
+                    logger.info(f"[COMPANY_NAME] Original nick: {nick}")
+                    if '_' in nick:
+                        parts = nick.split('_', 1)
+                        company_name = parts[1].strip() if len(parts) > 1 else nick.strip()
+                    else:
+                        company_name = nick.strip()
+                        logger.info(f"[COMPANY_NAME] No dash, company_name: {company_name}")
         except Exception as e:
             logger.error(f"[COMPANY_NAME] Error getting company name: {e}")
             company_name = ""
@@ -545,7 +546,7 @@ async def handle_input_sum(message: TgMessage):
             await safe_send_media_with_caption(
                 bot=message.bot,
                 chat_id=message.chat.id,
-                file_id=final_media_info,
+                file_id=final_media_info if final_media_info else None,
                 caption=final_msg_info,
                 reply_to_message_id=message.message_id
             )

@@ -47,6 +47,11 @@ async def get_worksheet_name_by_chat_id(chat_id: str) -> str:
     """Асинхронно получить имя worksheet по chat_id через nickneim пользователя с rang='group'"""
     user = None
     try:
+        if db.pool is None:
+            gs_logger.error(f"[GSheets] Нет подключения к базе данных (pool=None) при поиске пользователя по chat_id {chat_id}")
+            logger.error(f"[GSheets] Нет подключения к базе данных (pool=None) при поиске пользователя по chat_id {chat_id}")
+            print(f"[GSheets] Нет подключения к базе данных (pool=None) при поиске пользователя по chat_id {chat_id}")
+            return None
         async with db.pool.acquire() as conn:
             user = await conn.fetchrow('''
                 SELECT nickneim FROM "VSEPExchanger"."user" WHERE id = $1 AND rang = 'group'
@@ -83,7 +88,6 @@ class GSheetWriteResult:
             return "❌ Не удалось определить лист таблицы для записи"
         
         message = []
-        message.append(f"🟤 Заявки с произведённым расчётом добавлены в таблицу партнера")
         if self.success_count > 0:
             message.append(f"✅ Успешно записано заявок: {self.success_count}")
         if self.error_count > 0:
@@ -169,7 +173,7 @@ async def write_multiple_to_google_sheet(
         bot = Bot(token=config.BOT_TOKEN)
         await bot.send_message(
             chat_id=chat_id,
-            text="Оплаченные Сервисом заявки перенесены в отчетную таблицу Партнера"
+            text="🟤 Заявки с произведённым расчётом добавлены в таблицу партнера"
         )
         await bot.session.close()
 
