@@ -232,16 +232,23 @@ async def process_control_request(message: Message, crm_number: str):
         log_func(f"Счетчик контроля для чата {chat_id} увеличен: {counter} -> {new_counter}")
         
         # Формируем текст уведомления
-        operators_text = ", ".join([op.get('nickneim', str(op['id'])) for op in operators])
+        operator_nicks = []
+        for op in operators:
+            nick = op.get('nickneim', str(op['id']))
+            if nick.startswith('@'):
+                operator_nicks.append(nick)
+            else:
+                operator_nicks.append(f"@{nick}")
+        operators_text = ", ".join(operator_nicks) if operator_nicks else "нет активных операторов"
         counter_emoji = "🟨" if new_counter == 1 else "🟥" * new_counter
         notify_text = f"""<b>⚠️⚠️⚠️ ВНИМАНИЮ ОПЕРАТОРОВ:</b> 👨‍💻 {operators_text}
-⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b> из чата: {chat_title}
-🔗 <b>Ссылка:</b> <a href='{link}'>Перейти к сообщению</a>
-👤 <b>Автор:</b> {user_nick}
-📝 <b>Примечание:</b> {crm_number}
 
-{counter_emoji}
-<b>Счетчик контроля:</b> {new_counter}
+⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b> из чата: <code>{chat_title}</code>
+🔗 <b>Ссылка:</b> <a href='{link}'>Перейти к сообщению</a>
+👤 <b>Автор:</b> <code>{user_nick}</code>
+📝 <b>Примечание:</b> <code>{crm_number}</code>
+
+{counter_emoji} <b>Счетчик контроля:</b> {new_counter}
 """
         
         # Отправляем уведомление в админский чат
