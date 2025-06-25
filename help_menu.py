@@ -115,7 +115,8 @@ def get_bot_commands_for_status(status: str) -> List[BotCommand]:
             BotCommand(command="set_media_finish", description="Установить медиа для окончания смены (фото/видео)"),
             BotCommand(command="toggle_info_mbt", description="Включить/выключить информационное сообщение для MBT"),
             BotCommand(command="toggle_info_lgi", description="Включить/выключить информационное сообщение для LGI"),
-            BotCommand(command="toggle_info_tct", description="Включить/выключить информационное сообщение для TCT")
+            BotCommand(command="toggle_info_tct", description="Включить/выключить информационное сообщение для TCT"),
+            BotCommand(command="zombie", description="Оживить заявку из архива")
         ]
     elif status == "admin":
         return [
@@ -134,7 +135,8 @@ def get_bot_commands_for_status(status: str) -> List[BotCommand]:
             BotCommand(command="report", description="Показать отчет"),
             BotCommand(command="status", description="Показать статус"),
             BotCommand(command="order_show", description="Показать заявку"),
-            BotCommand(command="transfer", description="Перевод средств")
+            BotCommand(command="transfer", description="Перевод средств"),
+            BotCommand(command="zombie", description="Оживить заявку из архива")
         ]
     elif status == "operator":
         return [
@@ -148,7 +150,8 @@ def get_bot_commands_for_status(status: str) -> List[BotCommand]:
             BotCommand(command="rate_show", description="Показать курсы"),
             BotCommand(command="report", description="Показать отчет"),
             BotCommand(command="status", description="Показать статус"),
-            BotCommand(command="order_show", description="Показать заявку")
+            BotCommand(command="order_show", description="Показать заявку"),
+            BotCommand(command="zombie", description="Оживить заявку из архива")
         ]
     else:  # user
         return [
@@ -167,22 +170,23 @@ def build_pretty_help_text(status):
                  "<code>/1000000</code> - нужно 1 млн IDR - дать расчет и реквизиты для перевода RUB\n"
                  "<code>/-500000</code> - нужно вернуть 500000 IDR - дать расчет возврата</blockquote>\n"
                  "✦ <code>/sos</code> - срочный вызов представителя сервиса\n"
-                 "✦ <code>/control</code> - запрос контроля оплаты (с вложением)\n"
-                 "✦ <code>/order_show</code> - просмотр информации по отдельной заявке\n"
-                 "✦ <code>/status</code> - просмотр активных запросов\n"), 
+                 "✦ <code>/control [комментарий при необходимости]</code> - запрос контроля оплаты (с вложением)\n\n"
+                 "✦ <code>/status</code> - просмотр активных запросов\n"
+                 "✦ <code>/report</code> - отчет по всем группам запросов\n"
+                 "✦ <code>/order_show</code> - просмотр информации по отдельной заявке\n"),
         ("operator", "<u><b>👨‍💻 + для оператора Сервиса:</b></u>\n"
-                     "✦ <code>/accept & order_number</code> - отметка о принятии платежа\n"
-                     "✦ <code>/report</code> - отчет по всем группам запросов\n\n"
-                     "✦ <code>/check_control</code> - отчет по количеству запросов на контроле\n\n"
+                     #  "✦ <code>/accept & order_number</code> - отметка о принятии платежа\n"
                      "✦ <code>/bank_new</code> - добавить новые реквизиты на обмен\n"
                      "✦ <code>/bank_show</code> - показать все действующие реквизиты\n"
-                     "✦ <code>/bank_change</code> - сменить текущие или спец реквизиты\n"),
+                     "✦ <code>/bank_change</code> - сменить текущие или спец реквизиты\n\n"
+                     "✦ <code>/check_control</code> - отчет по количеству запросов на контроле\n"
+                     "✦ <code>/zombie [order_number]</code> - оживить заявку из архива (timeout → created)\n"),
         ("admin", "<u><b>👨🏻‍💼 + для админа Cервиса:</b></u>\n"
-                  "✦ <code>/transfer</code> - подтверждение оплаты ордеров из отчета\n"
-                  "✦ <code>/bank_remove</code> - удалить реквизиты навсегда\n\n"
+                  "✦ <code>/transfer [сумма]</code> - подтверждение оплаты ордеров из отчета (с вложением)\n\n"
+                  "✦ <code>/bank_remove</code> - удалить реквизиты навсегда\n"
+                  "✦ <code>/operator_show</code> - показать всех операторов\n"
                   "✦ <code>/operator_add</code> - назначить оператора сервиса\n"
-                  "✦ <code>/operator_remove</code> - снять права оператора\n"
-                  "✦ <code>/operator_show</code> - показать всех операторов\n\n"
+                  "✦ <code>/operator_remove</code> - снять права оператора\n\n"
                   "✦ <code>/rate_show</code> - показать текущие курсы обмена\n"
                   "✦ <code>/rate_change</code> - сменить текущий основной курс\n"
                   "⁴⁰⁴<code>/rate_zone_change</code> - cменить зоны (интервалы) обмена\n"
@@ -205,7 +209,7 @@ def build_pretty_help_text(status):
                        "✦ <code>/toggle_info_tct</code> — вкл/выкл инфо-скрипт для TCT\n")
     ]
     status_order = ["user", "operator", "admin", "superadmin"]
-    text = "(｡•̀ ᵕ •́｡) Я бот объединенного Сервиса обмена\nКоманды, доступные вам:\n\n"
+    text = "(｡•̀ ᵕ •́｡) Команды, доступные вам:\n\n"
     for s, section in sections:
         text += section + "\n"
         if s == status:

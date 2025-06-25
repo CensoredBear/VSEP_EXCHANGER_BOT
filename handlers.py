@@ -329,7 +329,7 @@ async def process_control_request_with_order(message: Message, crm_number: str, 
     
     user_nick = f"@{user.username}" if user.username else user.full_name
     chat_id = message.chat.id
-    msg_id = message.message_id
+    msg_id = message.message_id + 1
     chat_title = message.chat.title or message.chat.full_name or str(chat_id)
     
     # Формируем ссылку на сообщение
@@ -399,17 +399,18 @@ async def process_control_request_with_order(message: Message, crm_number: str, 
     из чата: <code>{chat_title}</code>
 👤 <b>Автор:</b> <code>{user_nick}</code>
 
-🔗 <b>Ссылка на запрос:</b>
-➖➖➖➖➖➖➖➖➖➖➖➖➖
-☑ <b><a href='{link}'>ПЕРЕЙТИ К ЗАПРОСУ</a></b> ☑
-➖➖➖➖➖➖➖➖➖➖➖➖➖
-
 📋 <b>Номер заявки:</b> <code>#{transaction_number}</code>
 💰 <b>Сумма:</b> <code>{rub_formatted} RUB | {idr_formatted} IDR</code>
 📝 <b>Примечание:</b> <code>{crm_number}</code>
 🟡 <b>Статус заявки:</b> НА КОНТРОЛЕ
 
 {counters_text}
+
+🔗 <b>Ссылка на запрос:</b>
+➖➖➖➖➖➖➖➖➖➖➖➖➖
+☑ <b><a href='{link}'>ПЕРЕЙТИ К ЗАПРОСУ</a></b> ☑
+➖➖➖➖➖➖➖➖➖➖➖➖➖
+(перейдите по ссылке, чтобы акцептовать заявку)
 """
         
         # Отправляем уведомление в админский чат
@@ -819,7 +820,7 @@ async def cmd_accept(message: Message):
 
     # 4. Нет номера заявки — ошибка
     if len(args) < 2:
-        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: не указан номер заявки.")
+        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: это архивная команда. В текщей реальности 'accept' осуществляется кнопкой под запросом.")
         return
 
     transaction_number = args[1].strip()
@@ -829,7 +830,7 @@ async def cmd_accept(message: Message):
         return
 
     if transaction.get('status') not in ("created", "timeout"):
-        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: текущий статус заявки <b>'{transaction.get('status')}'</b> не валиден для подтверждения.")
+        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: это архивная команда. В текщей реальности 'accept' осуществляется кнопкой под запросом.")
         return
 
     user_rank = await db.get_user_rank(message.from_user.id)
@@ -900,7 +901,11 @@ async def cmd_accept(message: Message):
     #     else:
     #         await message.reply(caption)
     # else:
-    await message.reply(caption)
+    
+    # Отправляем новое сообщение и сохраняем его ID
+    notification_msg = await message.reply(caption, parse_mode="HTML")
+    notification_msg_id = notification_msg.message_id
+    
     # Добавляем запись в history
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     user_nick = f"@{user.username}" if user.username else user.full_name
@@ -916,6 +921,18 @@ async def cmd_accept(message: Message):
         elif chat_id_num.startswith('-'):
             chat_id_num = chat_id_num[1:]
         link_accept = f"https://t.me/c/{chat_id_num}/{msg_id}"
+    
+    # Ссылка на новое сообщение с подтверждением
+    if message.chat.username:
+        link_notification = f"https://t.me/{message.chat.username}/{notification_msg_id}"
+    else:
+        chat_id_num = str(chat_id)
+        if chat_id_num.startswith('-100'):
+            chat_id_num = chat_id_num[4:]
+        elif chat_id_num.startswith('-'):
+            chat_id_num = chat_id_num[1:]
+        link_notification = f"https://t.me/c/{chat_id_num}/{notification_msg_id}"
+    
     # Данные о сообщении-контроле (reply)
     reply_user = reply.from_user
     reply_nick = f"@{reply_user.username}" if reply_user and reply_user.username else (reply_user.full_name if reply_user else "unknown")
@@ -935,12 +952,13 @@ async def cmd_accept(message: Message):
     # Формируем две записи
     control_entry = f"{reply_date}${reply_nick}$контроль${link_control}"
     accept_entry = f"{now_str}${user_nick}$accept${link_accept}"
+    notification_entry = f"{now_str}${user_nick}$notification${link_notification}"
     # Получаем старую history
     old_history = transaction.get('history', '')
     if old_history:
-        history = old_history + "%%%" + control_entry + "%%%" + accept_entry
+        history = old_history + "%%%" + control_entry + "%%%" + accept_entry + "%%%" + notification_entry
     else:
-        history = control_entry + "%%%" + accept_entry
+        history = control_entry + "%%%" + accept_entry + "%%%" + notification_entry
     await db.update_transaction_history(transaction_number, history)
     # --- Счетчик контроля ---
     key = f"{chat_id}_control_counter"
@@ -2255,7 +2273,12 @@ async def cmd_control(message: Message, state: FSMContext = None):
         ''', str(chat.id))
     
     if not created_orders:
-        await message.reply("❌ Нет активных заявок для контроля.\n\nСначала создайте заявку командой /check")
+        text = f'''❌ Нет активных заявок для контроля. Сначала создайте заявку.
+
+☢️ <b><i>'то, чего никогда не было и вот опять'</i></b>
+Если случился такой удивительный случай:пришла оплата по заявке из прошлой смены - обратитесь к оператору Сервиса (можете даже командой /sos) для попытки реанимировать заявку (предварительно найдите номер заявки в бланке расчёта с прошлой смены)
+        '''
+        await message.reply(text)
         return
     
     # Создаем кнопки для каждой заявки
@@ -2494,6 +2517,7 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(rate_change_cancel, F.data=="rate_change_cancel")
     dp.callback_query.register(report_callback_handler, F.data.regexp(r"^report_(bill|cancel)_"))
     dp.callback_query.register(control_callback_handler, F.data.startswith("control_"))
+    dp.callback_query.register(zombie_callback_handler, F.data.startswith("zombie_"))
     
     # Регистрируем обработчик для ввода суммы
     dp.message.register(handle_input_sum, lambda m: m.text and m.text.strip().startswith("/") and (m.text[1:].isdigit() or (m.text[1:].startswith("-") and m.text[2:].isdigit())))
@@ -2619,14 +2643,11 @@ async def accept_order_callback(call: CallbackQuery, state: FSMContext):
     old_history = transaction.get('history', '')
     history = old_history + "%%%" + accept_entry if old_history else accept_entry
     await db.update_transaction_history(transaction_number, history)
-    # Удаляем кнопку и подписываем сообщение
+    
+    # Удаляем кнопку и подписываем сообщение с активной ссылкой
     operator_name = call.from_user.full_name
     operator_username = f"@{call.from_user.username}" if call.from_user.username else ""
-    operator_info = f"{operator_name} {operator_username}".strip()
-    
-    new_text = call.message.text + f"\n\n✅ Заявка была акцептована.\n👤 оператор: {operator_info}\n🕐 время: {now_str}"
-    await call.message.edit_text(new_text, reply_markup=None)
-    await call.answer("Заявка акцептована!")
+    operator_info = f"{operator_username}".strip()
     
     # Отправляем отдельное уведомление в чат о подтверждении платежа
     rub_amount = int(transaction['rub_amount']) if transaction['rub_amount'] else 0
@@ -2643,4 +2664,207 @@ async def accept_order_callback(call: CallbackQuery, state: FSMContext):
         f"🔵 Статус заявки: <b>ПОДТВЕРЖДЕНА</b>"
     )
     
-    await call.message.answer(notification_text, parse_mode="HTML")
+    # Отправляем новое сообщение и сохраняем его ID
+    notification_msg = await call.message.answer(notification_text, parse_mode="HTML")
+    notification_msg_id = notification_msg.message_id
+    
+    # Формируем ссылку на новое сообщение
+    if call.message.chat.username:
+        link_to_notification = f"https://t.me/{call.message.chat.username}/{notification_msg_id}"
+    else:
+        chat_id_num = str(chat_id)
+        if chat_id_num.startswith('-100'):
+            chat_id_num = chat_id_num[4:]
+        elif chat_id_num.startswith('-'):
+            chat_id_num = chat_id_num[1:]
+        link_to_notification = f"https://t.me/c/{chat_id_num}/{notification_msg_id}"
+    
+    # Создаем активную ссылку на новое сообщение
+    active_link_text = f"✅ <a href=\"{link_to_notification}\">Заявка была акцептована</a>"
+    
+    new_text = call.message.text + f"\n\n{active_link_text}"
+    await call.message.edit_text(new_text, reply_markup=None, parse_mode="HTML")
+    await call.answer("Заявка акцептована!")
+
+# === КОМАНДА РЕАНИМАЦИИ ЗАЯВОК ===
+@router.message(Command("zombie"))
+async def cmd_zombie(message: Message, state: FSMContext):
+    """Команда реанимации заявок из статуса timeout в created"""
+    args = message.text.split()
+    
+    # Проверка формата команды
+    if len(args) < 2:
+        await message.reply(
+            "❌ Не выполнено.\n"
+            "ПРИЧИНА: не указан номер заявки.\n\n"
+            "📝 <b>Образец команды:</b>\n"
+            "<code>/zombie 2506123456789</code>"
+        )
+        return
+    
+    transaction_number = args[1].strip()
+    
+    # Проверка прав доступа
+    user_rank = await db.get_user_rank(message.from_user.id)
+    if user_rank not in ("operator", "admin", "superadmin"):
+        await message.reply("🚫 Не выполнено.\nПРИЧИНА: команда доступна только оператору, админу и суперадмину.")
+        return
+    
+    # Получаем заявку из базы
+    transaction = await db.get_transaction_by_number(transaction_number)
+    if not transaction:
+        await message.reply(
+            "❌ Не выполнено.\n"
+            "ПРИЧИНА: заявка с таким номером не найдена."
+        )
+        return
+    
+    # Проверяем статус заявки
+    if transaction.get('status') != "timeout":
+        await message.reply(
+            f"❌ Не выполнено.\n"
+            f"ПРИЧИНА: текущий статус заявки <b>'{transaction.get('status')}'</b> не подходит для реанимации.\n"
+            f"Реанимация возможна только для заявок со статусом <b>timeout</b>."
+        )
+        return
+    
+    # Форматируем данные заявки
+    rub_amount = int(transaction['rub_amount']) if transaction['rub_amount'] else 0
+    idr_amount = int(transaction['idr_amount']) if transaction['idr_amount'] else 0
+    rub_formatted = f"{rub_amount:,}".replace(",", " ")
+    idr_formatted = f"{idr_amount:,}".replace(",", " ")
+    created_at = transaction.get('created_at')
+    created_date = created_at.strftime("%d.%m.%Y") if created_at else "неизвестно"
+    account_info = transaction.get('account_info', 'не указаны')
+    
+    # Формируем сообщение подтверждения
+    confirm_text = (
+        f"🧟‍♂️ <b>ПОДТВЕРЖДЕНИЕ РЕАНИМАЦИИ ЗАЯВКИ</b>\n\n"
+        f"📋 <b>Номер заявки:</b> <code>{transaction_number}</code>\n"
+        f"📅 <b>Дата создания:</b> {created_date}\n"
+        f"💰 <b>Сумма:</b> {rub_formatted} RUB ({idr_formatted} IDR)\n"
+        f"🏦 <b>Реквизиты:</b> {account_info}\n\n"
+        f"⚠️ <b>Подтвердите, что вы хотите перевести эту заявку из статуса <i>timeout</i> в статус <i>created</i></b>\n\n"
+        f"👤 <b>Оператор:</b> {message.from_user.full_name}"
+    )
+    
+    # Создаем клавиатуру с кнопками подтверждения
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🧟‍♂️ Да, оживить", 
+                    callback_data=f"zombie_confirm_{transaction_number}_{message.from_user.id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена", 
+                    callback_data=f"zombie_cancel_{message.from_user.id}"
+                )
+            ]
+        ]
+    )
+    
+    await message.reply(confirm_text, reply_markup=keyboard, parse_mode="HTML")
+
+# === CALLBACK HANDLER для кнопок реанимации ===
+@router.callback_query(lambda c: c.data.startswith("zombie_"))
+async def zombie_callback_handler(call: CallbackQuery, state: FSMContext):
+    """Обработчик кнопок реанимации заявок"""
+    data_parts = call.data.split("_")
+    action = data_parts[1]  # confirm или cancel
+    user_id = call.from_user.id
+    
+    # Проверка прав доступа
+    user_rank = await db.get_user_rank(user_id)
+    if user_rank not in ("operator", "admin", "superadmin"):
+        await call.answer("🚫 Не ваша кнопка!", show_alert=True)
+        return
+    
+    if action == "cancel":
+        # Проверяем, что отменяет тот же пользователь
+        callback_user_id = int(data_parts[2])
+        if user_id != callback_user_id:
+            await call.answer("🚫 Не ваша кнопка!", show_alert=True)
+            return
+        
+        await call.message.edit_text(
+            call.message.text + "\n\n❌ <b>Реанимация отменена</b>",
+            parse_mode="HTML"
+        )
+        await call.answer("Реанимация отменена")
+        return
+    
+    elif action == "confirm":
+        # Проверяем, что подтверждает тот же пользователь
+        callback_user_id = int(data_parts[3])
+        if user_id != callback_user_id:
+            await call.answer("🚫 Не ваша кнопка!", show_alert=True)
+            return
+        
+        transaction_number = data_parts[2]
+        
+        # Получаем заявку
+        transaction = await db.get_transaction_by_number(transaction_number)
+        if not transaction:
+            await call.answer("❌ Заявка не найдена!", show_alert=True)
+            return
+        
+        if transaction.get('status') != "timeout":
+            await call.answer("❌ Статус заявки изменился!", show_alert=True)
+            return
+        
+        try:
+            # Обновляем статус заявки
+            from datetime import datetime, timezone
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            await db.update_transaction_status(transaction_number, "created", now_utc)
+            
+            # Добавляем запись в историю
+            now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            user_nick = f"@{call.from_user.username}" if call.from_user.username else call.from_user.full_name
+            chat_id = call.message.chat.id
+            msg_id = call.message.message_id
+            
+            # Формируем ссылку на сообщение
+            if call.message.chat.username:
+                link = f"https://t.me/{call.message.chat.username}/{msg_id}"
+            else:
+                chat_id_num = str(chat_id)
+                if chat_id_num.startswith('-100'):
+                    chat_id_num = chat_id_num[4:]
+                elif chat_id_num.startswith('-'):
+                    chat_id_num = chat_id_num[1:]
+                link = f"https://t.me/c/{chat_id_num}/{msg_id}"
+            
+            # Добавляем запись в историю
+            zombie_entry = f"{now_str}${user_nick}$реанимация${link}"
+            old_history = transaction.get('history', '')
+            history = old_history + "%%%" + zombie_entry if old_history else zombie_entry
+            await db.update_transaction_history(transaction_number, history)
+            
+            # Форматируем данные для сообщения
+            rub_amount = int(transaction['rub_amount']) if transaction['rub_amount'] else 0
+            idr_amount = int(transaction['idr_amount']) if transaction['idr_amount'] else 0
+            rub_formatted = f"{rub_amount:,}".replace(",", " ")
+            idr_formatted = f"{idr_amount:,}".replace(",", " ")
+            
+            # Обновляем сообщение
+            success_text = (
+                f"👻 <b>ЗАЯВКА ОЖИВЛЕНА!</b>\n\n"
+                f"📋 <b>Номер заявки:</b> <code>{transaction_number}</code>\n"
+                f"💰 <b>Сумма:</b> {rub_formatted} RUB ({idr_formatted} IDR)\n"
+                f"👤 <b>Оживил:</b> {user_nick}\n"
+                f"🕐 <b>Время:</b> {now_str}\n\n"
+                f"🔄 <b>Статус заявки изменен:</b> ⚫<i>timeout</i> → ⚪<b>created</b>"
+            )
+            
+            await call.message.edit_text(success_text, parse_mode="HTML")
+            await call.answer("👻 Заявка успешно оживлена!")
+            
+            log_func(f"Заявка {transaction_number} оживлена пользователем {user_id} ({user_nick})")
+            
+        except Exception as e:
+            log_error(f"Ошибка при оживлении заявки {transaction_number}: {e}")
+            await call.answer("❌ Произошла ошибка при оживлении!", show_alert=True)
+            return

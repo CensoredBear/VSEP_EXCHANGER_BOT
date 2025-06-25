@@ -261,7 +261,7 @@ async def handle_input_sum(message: TgMessage):
             # Получаем никнейм чата для формирования номера заявки
             nickneim = await db.get_chat_nickneim(chat.id)
             nick3 = (nickneim[:3].upper() if nickneim else "NON")
-            transaction_number = f"{day}{month}{hour}{minute}{nick3}{message.message_id}"
+            transaction_number = f"{day}{month}.{hour}{minute}.{nick3}.{message.message_id}"
             created_at = naive_now
             status = "created"
             status_changed_at = naive_now

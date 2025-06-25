@@ -82,7 +82,7 @@ async def handle_input_sum(message: TgMessage):
         ms = f"{now.microsecond // 1000:03d}"
         user_id_str = str(user.id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-        transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+        transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
         status = "night"
         status_changed_at = naive_now
@@ -182,7 +182,7 @@ async def handle_input_sum(message: TgMessage):
             ms = f"{now.microsecond // 1000:03d}"
             user_id_str = str(user.id)[-3:].zfill(3)
             msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-            transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+            transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
             created_at = naive_now
             status = "created"
             status_changed_at = naive_now
@@ -287,7 +287,7 @@ async def handle_input_sum(message: TgMessage):
         ms = f"{now.microsecond // 1000:03d}"
         user_id_str = str(user.id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-        transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+        transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
         status = "created"
         status_changed_at = naive_now
@@ -411,7 +411,7 @@ async def handle_input_sum(message: TgMessage):
         ms = f"{now.microsecond // 1000:03d}"
         user_id_str = str(user.id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-        transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+        transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
         status = "created"
         status_changed_at = naive_now
@@ -498,7 +498,7 @@ async def handle_input_sum(message: TgMessage):
         ms = f"{now.microsecond // 1000:03d}"
         user_id_str = str(user.id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
-        transaction_number = f"{day}{month}{user_id_str}{hour}{minute}{ms}{msg_id_last2}"
+        transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
         status = "night"
         status_changed_at = naive_now
