@@ -352,4 +352,55 @@ class Database:
         key = f"{chat_id}_control_counter"
         await self.set_system_setting(key, str(value))
 
+    async def get_all_control_counters(self):
+        """Получить все счетчики контроля по всем чатам"""
+        async with self.pool.acquire() as conn:
+            # Получаем все ключи, которые заканчиваются на _control_counter
+            rows = await conn.fetch('''
+                SELECT key, value 
+                FROM "VSEPExchanger".system_settings 
+                WHERE key LIKE '%_control_counter'
+            ''')
+            
+            counters = []
+            for row in rows:
+                key = row['key']
+                value = int(row['value']) if row['value'] else 0
+                
+                # Извлекаем chat_id из ключа (убираем _control_counter)
+                chat_id_str = key.replace('_control_counter', '')
+                try:
+                    chat_id = int(chat_id_str)
+                    
+                    # Получаем название чата (если есть в базе)
+                    chat_title = await self.get_chat_title(chat_id)
+                    
+                    counters.append({
+                        'chat_id': chat_id,
+                        'chat_title': chat_title or f"Чат {chat_id}",
+                        'counter': value
+                    })
+                except ValueError:
+                    # Пропускаем некорректные ключи
+                    continue
+            
+            # Сортируем по убыванию счетчика
+            counters.sort(key=lambda x: x['counter'], reverse=True)
+            return counters
+
+    async def get_chat_title(self, chat_id: int) -> str:
+        """Получить название чата по его ID"""
+        async with self.pool.acquire() as conn:
+            # Пытаемся найти чат в таблице user
+            row = await conn.fetchrow('''
+                SELECT nickneim 
+                FROM "VSEPExchanger"."user" 
+                WHERE id = $1
+            ''', chat_id)
+            
+            if row and row['nickneim']:
+                return row['nickneim']
+            
+            return None
+
 db = Database() 

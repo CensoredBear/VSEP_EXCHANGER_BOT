@@ -225,11 +225,15 @@ async def process_control_request(message: Message, crm_number: str):
         operators = await db.get_operators()
         log_func(f"Получен список операторов: {len(operators)}")
         
-        # Счетчик контроля
+        # Счетчик контроля для текущего чата
         counter = await db.get_control_counter(chat_id)
         new_counter = counter + 1
         await db.set_control_counter(chat_id, new_counter)
         log_func(f"Счетчик контроля для чата {chat_id} увеличен: {counter} -> {new_counter}")
+        
+        # Получаем все счетчики контроля по всем чатам
+        all_counters = await db.get_all_control_counters()
+        log_func(f"Получены счетчики контроля: {len(all_counters)} чатов")
         
         # Формируем текст уведомления
         operator_nicks = []
@@ -240,7 +244,16 @@ async def process_control_request(message: Message, crm_number: str):
             else:
                 operator_nicks.append(f"@{nick}")
         operators_text = ", ".join(operator_nicks) if operator_nicks else "нет активных операторов"
-        counter_emoji = "🟨" if new_counter == 1 else "🟥" * new_counter
+        
+        # Формируем строки со счетчиками контроля
+        counter_lines = []
+        for chat_counter in all_counters:
+            if chat_counter['counter'] > 0:  # Показываем только чаты с счетчиком > 0
+                counter_emoji = "🟨" if chat_counter['counter'] == 1 else "🟥" * chat_counter['counter']
+                counter_lines.append(f"{counter_emoji} Счетчик контроля ({chat_counter['chat_title']}): {chat_counter['counter']}")
+        
+        counters_text = "\n".join(counter_lines) if counter_lines else "Нет активных счетчиков контроля"
+        
         notify_text = f"""<b>⚠️⚠️⚠️ ВНИМАНИЮ ОПЕРАТОРОВ:</b> 👨‍💻 {operators_text}
 
 ⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b> из чата: <code>{chat_title}</code>
@@ -248,7 +261,8 @@ async def process_control_request(message: Message, crm_number: str):
 👤 <b>Автор:</b> <code>{user_nick}</code>
 📝 <b>Примечание:</b> <code>{crm_number}</code>
 
-{counter_emoji} <b>Счетчик контроля:</b> {new_counter}
+<b>📊 Счетчики контроля по чатам:</b>
+{counters_text}
 """
         
         # Отправляем уведомление в админский чат
