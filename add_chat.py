@@ -26,7 +26,11 @@ async def add_chat_to_db(message: Message):
     
     try:
         # Проверяем, есть ли уже чат в базе данных
-        existing_chat = await db.pool.fetchrow(
+        if db.pool is None:
+            await message.reply("❌ <b>Ошибка:</b> Нет подключения к базе данных.", parse_mode="HTML")
+            return
+        pool = db.pool
+        existing_chat = await pool.fetchrow(
             'SELECT * FROM "VSEPExchanger"."user" WHERE id = $1',
             chat_id
         )
@@ -95,21 +99,25 @@ async def add_chat_with_type(message: Message, chat_type: str):
     
     try:
         # Проверяем, есть ли уже чат в базе данных
-        existing_chat = await db.pool.fetchrow(
+        if db.pool is None:
+            await message.reply("❌ <b>Ошибка:</b> Нет подключения к базе данных.", parse_mode="HTML")
+            return
+        pool = db.pool
+        existing_chat = await pool.fetchrow(
             'SELECT * FROM "VSEPExchanger"."user" WHERE id = $1',
             chat_id
         )
         
         if existing_chat:
             # Обновляем существующий чат
-            await db.pool.execute(
+            await pool.execute(
                 'UPDATE "VSEPExchanger"."user" SET nickneim = $1, rang = $2, updated_at = $3 WHERE id = $4',
                 nickneim, 'group', datetime.now(), chat_id
             )
             action = "обновлен"
         else:
             # Добавляем новый чат
-            await db.pool.execute(
+            await pool.execute(
                 'INSERT INTO "VSEPExchanger"."user" (id, nickneim, rang, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)',
                 chat_id, nickneim, 'group', datetime.now(), datetime.now()
             )
@@ -161,7 +169,11 @@ async def update_chat(message: Message):
     
     try:
         # Обновляем чат
-        result = await db.pool.execute(
+        if db.pool is None:
+            await message.reply("❌ <b>Ошибка:</b> Нет подключения к базе данных.", parse_mode="HTML")
+            return
+        pool = db.pool
+        result = await pool.execute(
             'UPDATE "VSEPExchanger"."user" SET nickneim = $1, updated_at = $2 WHERE id = $3',
             nickneim, datetime.now(), chat_id
         )
