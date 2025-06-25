@@ -233,15 +233,16 @@ async def process_control_request(message: Message, crm_number: str):
         
         # Формируем текст уведомления
         operators_text = ", ".join([op.get('nickneim', str(op['id'])) for op in operators])
-        notify_text = (
-            f"🔍 <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b>\n\n"
-            f"📋 <b>Чат:</b> {chat_title}\n"
-            f"👤 <b>Пользователь:</b> {user_nick}\n"
-            f"🔗 <b>Ссылка:</b> <a href='{link}'>Перейти к сообщению</a>\n"
-            f"📝 <b>Примечание:</b> {crm_number}\n"
-            f"🔢 <b>Счетчик контроля:</b> {new_counter}\n\n"
-            f"👨‍💻 <b>Уведомлены операторы:</b> {operators_text}"
-        )
+        counter_emoji = "🟨" if new_counter == 1 else "🟥" * new_counter
+        notify_text = f"""<b>⚠️⚠️⚠️ ВНИМАНИЮ ОПЕРАТОРОВ:</b> 👨‍💻 {operators_text}
+⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b> из чата: {chat_title}
+🔗 <b>Ссылка:</b> <a href='{link}'>Перейти к сообщению</a>
+👤 <b>Автор:</b> {user_nick}
+📝 <b>Примечание:</b> {crm_number}
+
+{counter_emoji}
+<b>Счетчик контроля:</b> {new_counter}
+"""
         
         # Отправляем уведомление в админский чат
         await send_to_admin_group_safe(message.bot, notify_text)
