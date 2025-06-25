@@ -35,15 +35,16 @@ gs_logger.addHandler(file_handler)
 def get_chat_table_map():
     """Получение маппинга чатов на таблицы из системных настроек"""
     try:
-        if not system_settings.google_sheets_chat_table_map:
+        value = getattr(system_settings, 'google_sheets_chat_table_map', None)
+        if not value:
             gs_logger.error("Не настроен маппинг чатов на таблицы")
             return {}
-        return json.loads(system_settings.google_sheets_chat_table_map)
+        return json.loads(value)
     except Exception as e:
         gs_logger.error(f"Ошибка при загрузке маппинга чатов: {e}")
         return {}
 
-async def get_worksheet_name_by_chat_id(chat_id: str) -> str:
+async def get_worksheet_name_by_chat_id(chat_id: str) -> Optional[str]:
     """Асинхронно получить имя worksheet по chat_id через nickneim пользователя с rang='group'"""
     user = None
     try:
@@ -115,8 +116,8 @@ async def send_gsheet_summary(chat_id: str, result: GSheetWriteResult):
 async def write_to_google_sheet_async(
     chat_id: str,
     row_data: list,
-    worksheet_name: str = None,
-    write_result: GSheetWriteResult = None
+    worksheet_name: Optional[str] = None,
+    write_result: Optional[GSheetWriteResult] = None
 ):
     """
     Асинхронно добавляет строку в Google Sheet на лист, определяемый по chat_id через nickneim.
@@ -155,7 +156,7 @@ async def write_to_google_sheet_async(
 async def write_multiple_to_google_sheet(
     chat_id: str,
     rows_data: list,
-    worksheet_name: str = None
+    worksheet_name: Optional[str] = None
 ):
     """
     Записывает несколько строк в Google Sheet и отправляет одно итоговое уведомление
@@ -253,7 +254,7 @@ def prepare_row_for_gsheet(row_data):
 def write_to_google_sheet_sync(
     chat_id: str,
     row_data: list,
-    worksheet_name: str = None
+    worksheet_name: Optional[str] = None
 ):
     """
     Синхронно добавляет строку в Google Sheet на лист worksheet_name.
@@ -286,7 +287,7 @@ def write_to_google_sheet_sync(
         # Формируем строку для Google Sheets по ТЗ
         gsheet_row = prepare_row_for_gsheet(row_data)
         gs_logger.info(f"[GSheets] Пытаюсь записать строку: {gsheet_row}")
-        ws.append_row(gsheet_row, value_input_option="USER_ENTERED")
+        ws.append_row(gsheet_row, value_input_option="USER_ENTERED")  # type: ignore
         gs_logger.info(f"[GSheets] Успешно записано: {gsheet_row}")
     except Exception as e:
         gs_logger.error(f"[GSheets] Ошибка при записи в Google Sheets: {e}")
