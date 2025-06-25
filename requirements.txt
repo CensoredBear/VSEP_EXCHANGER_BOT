@@ -9,6 +9,7 @@ requests>=2.31.0
 gunicorn>=21.2.0
 psycopg2-binary>=2.9.9
 gspread>=5.12.0
+gspread-asyncio>=1.0.0
 google-auth>=2.27.0
 google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
