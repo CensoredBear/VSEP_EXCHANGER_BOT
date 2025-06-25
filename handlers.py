@@ -5,7 +5,7 @@ VSEPExchangerBot Handlers
 """
 from aiogram import Dispatcher, Router
 from aiogram.filters import CommandStart, Command, CommandObject
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, User
 from aiogram import Bot
 from aiogram import F
 from aiogram.fsm.state import State, StatesGroup
@@ -42,6 +42,7 @@ import time
 import asyncio
 from aiogram.exceptions import TelegramBadRequest, TelegramMigrateToChat
 import json
+from collections import defaultdict
 
 # Создаем роутер для всех обработчиков
 router = Router()
@@ -53,7 +54,13 @@ class RateChangeStates(StatesGroup):
 class ShiftTimeStates(StatesGroup):
     waiting_for_time = State()
 
+class ControlStates(StatesGroup):
+    waiting_for_order_selection = State()
+
 BALI_TZ = timezone(timedelta(hours=8))
+
+# Глобальный dict: для каждого чата только один актуальный control message_id
+active_control_message = defaultdict(lambda: None)
 
 async def send_to_admin_group_safe(bot, text, parse_mode="HTML"):
     """Безопасная отправка сообщения в админскую группу с обработкой миграции"""
@@ -281,9 +288,126 @@ async def process_control_request(message: Message, crm_number: str):
 ⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b>
     из чата: <code>{chat_title}</code>
 👤 <b>Автор:</b> <code>{user_nick}</code>
-🔗 <b>Ссылка:</b> <a href='{link}'>Перейти к сообщению</a>
+🔗 <b>Ссылка:</b> <b><a href='{link}'>ПЕРЕЙТИ К ЗАПРОСУ</a></b>
 
 📝 <b>Примечание:</b> <code>{crm_number}</code>
+
+{counters_text}
+"""
+        
+        # Отправляем уведомление в админский чат
+        await send_to_admin_group_safe(message.bot, notify_text)
+        log_system(f"Отправлено уведомление в админский чат {config.ADMIN_GROUP}")
+        
+        # Отправляем личные сообщения каждому оператору
+        for operator in operators:
+            try:
+                operator_id = operator['id']
+                operator_nick = operator.get('nickneim', '')
+                log_func(f"Отправка сообщения оператору {operator_id} ({operator_nick})")
+                await message.bot.send_message(
+                    operator_id,
+                    notify_text,
+                    parse_mode="HTML"
+                )
+                log_system(f"Отправлено уведомление оператору {operator_id} ({operator_nick})")
+            except Exception as e:
+                log_error(f"Ошибка при отправке уведомления оператору {operator_id}: {e}")
+        
+        log_func("Запрос контроля успешно обработан")
+    except Exception as e:
+        log_error(f"Ошибка при отправке уведомления: {e}")
+        await message.reply("❌ Произошла ошибка при отправке уведомления операторам.")
+
+async def process_control_request_with_order(message: Message, crm_number: str, transaction_number: str, order: dict, user: User = None):
+    """Обработка запроса контроля с конкретной заявкой"""
+    log_func(f"Начало обработки запроса контроля заявки {transaction_number} с {crm_number}")
+    
+    # Используем переданного пользователя или извлекаем из сообщения
+    if user is None:
+        user = message.from_user
+    
+    user_nick = f"@{user.username}" if user.username else user.full_name
+    chat_id = message.chat.id
+    msg_id = message.message_id
+    chat_title = message.chat.title or message.chat.full_name or str(chat_id)
+    
+    # Формируем ссылку на сообщение
+    if message.chat.username:
+        link = f"https://t.me/{message.chat.username}/{msg_id}"
+    else:
+        chat_id_num = str(chat_id)
+        if chat_id_num.startswith('-100'):
+            chat_id_num = chat_id_num[4:]
+        elif chat_id_num.startswith('-'):
+            chat_id_num = chat_id_num[1:]
+        link = f"https://t.me/c/{chat_id_num}/{msg_id}"
+    
+    log_func(f"Сформирована ссылка на сообщение: {link}")
+    
+    try:
+        # Получаем список операторов
+        operators = await db.get_operators()
+        if not operators:
+            await message.reply("❌ Нет активных операторов для контроля.")
+            return
+        log_func(f"Получен список операторов: {len(operators)}")
+        
+        # Счетчик контроля для текущего чата
+        counter = await db.get_control_counter(chat_id)
+        if counter is None:
+            counter = 0
+        new_counter = counter + 1
+        await db.set_control_counter(chat_id, new_counter)
+        log_func(f"Счетчик контроля для чата {chat_id} увеличен: {counter} -> {new_counter}")
+        
+        # Получаем все счетчики контроля по всем чатам
+        all_counters = await db.get_all_control_counters()
+        if not all_counters:
+            all_counters = []
+        log_func(f"Получены счетчики контроля: {len(all_counters)} чатов")
+        
+        # Формируем текст уведомления
+        operator_nicks = []
+        for op in operators:
+            nick = op.get('nickneim', str(op['id']))
+            if nick.startswith('@'):
+                operator_nicks.append(nick)
+            else:
+                operator_nicks.append(f"@{nick}")
+        operators_text = ", ".join(operator_nicks) if operator_nicks else "нет активных операторов"
+        
+        # Формируем строки со счетчиками контроля
+        counter_lines = []
+        for chat_counter in all_counters:
+            if chat_counter['counter'] > 0:  # Показываем только чаты с счетчиком > 0
+                counter_emoji = "🟨" if chat_counter['counter'] == 1 else "🟥" * chat_counter['counter']
+                counter_lines.append(f"{counter_emoji} Счетчик контроля <code>{chat_counter['chat_title']}</code>: {chat_counter['counter']}")
+        
+        counters_text = "\n".join(counter_lines) if counter_lines else "Нет активных счетчиков контроля"
+        
+        # Форматируем суммы для отображения
+        rub_amount = int(order['rub_amount']) if order['rub_amount'] else 0
+        idr_amount = int(order['idr_amount']) if order['idr_amount'] else 0
+        rub_formatted = f"{rub_amount:,}".replace(",", " ")
+        idr_formatted = f"{idr_amount:,}".replace(",", " ")
+        
+        notify_text = f"""<b>⚠️ ВНИМАНИЮ ОПЕРАТОРОВ ⚠️:</b> 
+👨‍💻 {operators_text}
+
+⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b>
+    из чата: <code>{chat_title}</code>
+👤 <b>Автор:</b> <code>{user_nick}</code>
+
+🔗 <b>Ссылка на запрос:</b>
+➖➖➖➖➖➖➖➖➖➖➖➖➖
+☑ <b><a href='{link}'>ПЕРЕЙТИ К ЗАПРОСУ</a></b> ☑
+➖➖➖➖➖➖➖➖➖➖➖➖➖
+
+📋 <b>Номер заявки:</b> <code>#{transaction_number}</code>
+💰 <b>Сумма:</b> <code>{rub_formatted} RUB | {idr_formatted} IDR</code>
+📝 <b>Примечание:</b> <code>{crm_number}</code>
+🟡 <b>Статус заявки:</b> НА КОНТРОЛЕ
 
 {counters_text}
 """
@@ -316,17 +440,173 @@ async def control_callback_handler(call: CallbackQuery, state: FSMContext):
     """Обработчик callback-кнопок команды control"""
     log_user(f"Получен callback {call.data} от пользователя {call.from_user.id}")
     
-    if call.data == "control_without_crm":
-        log_func("Обработка нажатия кнопки 'Подтвердить без CRM'")
-        # Удаляем кнопки
-        await call.message.edit_reply_markup(reply_markup=None)
-        # Обрабатываем запрос без CRM
-        await process_control_request(call.message, "без CRM")
-    elif call.data == "control_cancel":
+    # Проверяем права доступа (владелец или суперадмин)
+    state_data = await state.get_data()
+    owner_id = state_data.get('owner_id')
+    
+    if not owner_id:
+        await call.answer("❌ Ошибка: данные сессии устарели.", show_alert=True)
+        return
+    
+    # Проверяем, является ли пользователь владельцем или суперадмином
+    is_owner = call.from_user.id == owner_id
+    is_superadmin_user = await is_superadmin(call.from_user.id)
+    
+    if not (is_owner or is_superadmin_user):
+        await call.answer("❌ Извините, это не ваша кнопка. Действие невозможно.", show_alert=True)
+        return
+    
+    if call.data == "control_cancel":
         log_func("Обработка нажатия кнопки 'Отмена'")
-        # Удаляем сообщение полностью
-        await call.message.delete()
-        log_func("Сообщение с кнопками удалено")
+        
+        # Отменяем задачу истечения кнопок
+        state_data = await state.get_data()
+        expire_task = state_data.get('expire_task')
+        base_text = state_data.get('base_text', '')
+        if expire_task and not expire_task.done():
+            expire_task.cancel()
+            log_func("Задача истечения кнопок отменена")
+        
+        # Убираем кнопки и добавляем текст о незавершенной команде
+        new_text = base_text + "\n\n** ℹ️ КОМАНДА КОНТРОЛЬ НЕ ЗАВЕРШЕНА МЕНЕДЖЕРОМ ℹ️. НАЖАТА КНОПКА ОТМЕНА**"
+        
+        await call.message.edit_text(
+            text=new_text,
+            reply_markup=None  # Убираем все кнопки
+        )
+        # Очищаем message_id
+        active_control_message[call.message.chat.id] = None
+        # Сбрасываем состояние
+        await state.clear()
+        log_func("Кнопки убраны, добавлен текст об отмене")
+        return
+    
+    if call.data.startswith("control_order_"):
+        # Обработка выбора конкретной заявки
+        parts = call.data.split("_")
+        if len(parts) >= 3:
+            transaction_number = parts[2]
+            
+            # Получаем примечание из состояния
+            crm_number = state_data.get('crm_number', '-')
+            
+            log_func(f"Обработка выбора заявки {transaction_number} с примечанием: {crm_number}")
+            
+            # Обновляем статус заявки на "на контроле"
+            if not db.pool:
+                await call.answer("❌ Ошибка: база данных недоступна.", show_alert=True)
+                return
+            
+            try:
+                async with db.pool.acquire() as conn:
+                    # Проверяем, что заявка существует и имеет статус "создана"
+                    order = await conn.fetchrow('''
+                        SELECT transaction_number, rub_amount, idr_amount, status
+                        FROM "VSEPExchanger"."transactions"
+                        WHERE transaction_number = $1 AND source_chat = $2
+                    ''', transaction_number, str(call.message.chat.id))
+                    
+                    if not order:
+                        await call.answer("❌ Заявка не найдена.", show_alert=True)
+                        return
+                    
+                    if order['status'] != 'created':
+                        await call.answer(f"❌ Заявка уже имеет статус: {order['status']}", show_alert=True)
+                        return
+                    
+                    # Обновляем статус на "на контроле"
+                    await conn.execute('''
+                        UPDATE "VSEPExchanger"."transactions"
+                        SET status = 'control', status_changed_at = NOW()
+                        WHERE transaction_number = $1
+                    ''', transaction_number)
+                    
+                    # Записываем в историю
+                    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                    user_nick = f"@{call.from_user.username}" if call.from_user.username else call.from_user.full_name
+                    
+                    # Формируем ссылку на сообщение
+                    if call.message.chat.username:
+                        link = f"https://t.me/{call.message.chat.username}/{call.message.message_id}"
+                    else:
+                        chat_id_num = str(call.message.chat.id)
+                        if chat_id_num.startswith('-100'):
+                            chat_id_num = chat_id_num[4:]
+                        elif chat_id_num.startswith('-'):
+                            chat_id_num = chat_id_num[1:]
+                        link = f"https://t.me/c/{chat_id_num}/{call.message.message_id}"
+                    
+                    control_entry = f"{now_str}${user_nick}$контроль${link}"
+                    
+                    # Получаем старую историю и добавляем новую запись
+                    old_history = await conn.fetchval('''
+                        SELECT history FROM "VSEPExchanger"."transactions"
+                        WHERE transaction_number = $1
+                    ''', transaction_number)
+                    
+                    if old_history:
+                        history = old_history + "%%%" + control_entry
+                    else:
+                        history = control_entry
+                    
+                    # Обновляем историю
+                    await conn.execute('''
+                        UPDATE "VSEPExchanger"."transactions"
+                        SET history = $2
+                        WHERE transaction_number = $1
+                    ''', transaction_number, history)
+                    
+                    log_func(f"Статус заявки {transaction_number} изменен: created -> control")
+                
+                # Удаляем сообщение с кнопками
+                await call.message.delete()
+                
+                # Отменяем задачу истечения кнопок
+                state_data = await state.get_data()
+                expire_task = state_data.get('expire_task')
+                if expire_task and not expire_task.done():
+                    expire_task.cancel()
+                    log_func("Задача истечения кнопок отменена при выборе заявки")
+                # Очищаем message_id
+                active_control_message[call.message.chat.id] = None
+                
+                # Отправляем сообщение о том, что заявка отправлена на контроль
+                rub_amount = int(order['rub_amount']) if order['rub_amount'] else 0
+                idr_amount = int(order['idr_amount']) if order['idr_amount'] else 0
+                rub_formatted = f"{rub_amount:,}".replace(",", " ")
+                idr_formatted = f"{idr_amount:,}".replace(",", " ")
+                
+                control_message = (
+                    f"🟡 Заявка отправлена на контроль!\n\n"
+                    f"📋 Номер заявки: <code>{transaction_number}</code>\n"
+                    f"💰 Сумма: {rub_formatted} RUB | {idr_formatted} IDR\n"
+                    f"📝 Примечание: {crm_number}\n"
+                    f"🟡 Статус заявки: <b>НА КОНТРОЛЕ</b>\n\n"
+                    f"Операторы уведомлены.\nОжидайте подтверждения получения транзакции."
+                )
+                # Добавляем кнопку "Принять" для операторов/админов/суперадминов
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                accept_keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Подтвердить транзакцию (accept)", callback_data=f"accept_order_{transaction_number}")]
+                    ]
+                )
+                control_msg = await call.message.answer(control_message, reply_markup=accept_keyboard)
+                log_func("Отправлено сообщение о заявке на контроле с кнопкой Принять")
+                
+                # Сохраняем ID сообщения с кнопкой в состоянии для использования в accept callback
+                await state.update_data(control_message_id=control_msg.message_id)
+                
+                # Отправляем уведомление операторам
+                await process_control_request_with_order(call.message, crm_number, transaction_number, order, call.from_user)
+                
+                # Сбрасываем состояние
+                await state.clear()
+                
+            except Exception as e:
+                log_error(f"Ошибка при обновлении статуса заявки {transaction_number}: {e}")
+                await call.answer("❌ Произошла ошибка при обработке заявки.", show_alert=True)
+                return
     
     # Сбрасываем состояние
     await state.clear()
@@ -653,7 +933,7 @@ async def cmd_accept(message: Message):
     else:
         link_control = "-"
     # Формируем две записи
-    control_entry = f"{reply_date}${reply_nick}$control${link_control}"
+    control_entry = f"{reply_date}${reply_nick}$контроль${link_control}"
     accept_entry = f"{now_str}${user_nick}$accept${link_accept}"
     # Получаем старую history
     old_history = transaction.get('history', '')
@@ -1898,91 +2178,6 @@ async def cmd_restart(message: Message):
         logger.error(f"[RESTART] Ошибка при перезапуске: {e}")
         await message.reply("❌ Произошла ошибка при перезапуске.")
 
-
-
-def register_handlers(dp: Dispatcher):
-    """Регистрация всех обработчиков"""
-    print("[DEBUG] register_handlers: начало регистрации")
-    
-    # Сначала подключаем основной роутер
-    print("[DEBUG] register_handlers: подключаю основной роутер")
-    dp.include_router(router)
-    print("[DEBUG] register_handlers: основной роутер подключен")
-    
-    # Затем подключаем роутер для банковских операций
-    print("[DEBUG] register_handlers: подключаю банковский роутер")
-    dp.include_router(bank_router)
-    print("[DEBUG] register_handlers: банковский роутер подключен")
-    
-    # Регистрируем остальные callback обработчики напрямую в диспетчер
-    dp.callback_query.register(force_open_callback, lambda c: c.data in ["force_open_yes", "force_open_no"])
-    dp.callback_query.register(force_close_callback, lambda c: c.data in ["force_close_yes", "force_close_no"])
-    dp.callback_query.register(admin_add_confirm_callback, F.data.startswith("admin_add_confirm:"))
-    dp.callback_query.register(admin_add_cancel_callback, F.data.startswith("admin_add_cancel:"))
-    dp.callback_query.register(admin_remove_confirm_callback, F.data.startswith("admin_remove_confirm:"))
-    dp.callback_query.register(admin_remove_cancel_callback, F.data.startswith("admin_remove_cancel:"))
-    dp.callback_query.register(operator_add_confirm_callback, F.data.startswith("operator_add_confirm:"))
-    dp.callback_query.register(operator_add_cancel_callback, F.data.startswith("operator_add_cancel:"))
-    dp.callback_query.register(operator_remove_confirm_callback, F.data.startswith("operator_remove_confirm:"))
-    dp.callback_query.register(operator_remove_cancel_callback, F.data.startswith("operator_remove_cancel:"))
-    dp.callback_query.register(rate_change_confirm, F.data=="rate_change_confirm")
-    dp.callback_query.register(rate_change_cancel, F.data=="rate_change_cancel")
-    dp.callback_query.register(report_callback_handler, F.data.regexp(r"^report_(bill|cancel)_"))
-    dp.callback_query.register(control_callback_handler, F.data.startswith("control_"))
-    
-    # Регистрируем обработчик для ввода суммы
-    dp.message.register(handle_input_sum, lambda m: m.text and m.text.strip().startswith("/") and (m.text[1:].isdigit() or (m.text[1:].startswith("-") and m.text[2:].isdigit())))
-    
-    print("[DEBUG] register_handlers: регистрация завершена")
-
-async def _toggle_info_flag(message: Message, flag_name: str, chat_type: str):
-    """(Superadmin) Включить/выключить информационное сообщение для чата."""
-    user = message.from_user
-    chat_id = message.chat.id
-
-    logger.info(f"[{flag_name.upper()}] Команда /toggle_info_{chat_type.lower()} вызвана пользователем {user.id} (@{user.username}) в чате {chat_id}")
-
-    # Проверяем права (только суперадмин)
-    if not await is_superadmin(user.id):
-        logger.warning(f"[{flag_name.upper()}] Отказ в доступе для пользователя {user.id} - недостаточно прав")
-        await message.reply("🚫 Не выполнено.\nПРИЧИНА: команда доступна только суперадмину.")
-        return
-
-    logger.info(f"[{flag_name.upper()}] Права доступа подтверждены для пользователя {user.id}")
-
-    try:
-        # Используем специальный метод для переключения системной настройки
-        new_state = await db.toggle_system_setting(flag_name)
-        
-        # Обновляем системные настройки в памяти
-        await system_settings.load()
-        
-        status_text = "включен ✅" if new_state else "выключен ❌"
-        response_text = f"Информационный скрипт для чата {chat_type} успешно {status_text}"
-        
-        await message.reply(response_text)
-        logger.info(f"[{flag_name.upper()}] Статус изменен на {new_state} пользователем {user.id}")
-
-    except Exception as e:
-        logger.error(f"[{flag_name.upper()}] Ошибка при переключении флага: {e}")
-        await message.reply("❌ Произошла ошибка при изменении настройки.")
-
-
-@router.message(Command("toggle_info_mbt"))
-async def cmd_toggle_info_mbt(message: Message):
-    """(Superadmin) Включить/выключить информационное сообщение для MBT"""
-    await _toggle_info_flag(message, "send_info_mbt", "MBT")
-
-@router.message(Command("toggle_info_lgi"))
-async def cmd_toggle_info_lgi(message: Message):
-    """(Superadmin) Включить/выключить информационное сообщение для LGI"""
-    await _toggle_info_flag(message, "send_info_lgi", "LGI")
-
-@router.message(Command("toggle_info_tct"))
-async def cmd_toggle_info_tct(message: Message):
-    """(Superadmin) Включить/выключить информационное сообщение для TCT"""
-    await _toggle_info_flag(message, "send_info_tct", "TCT")
-
 @router.message(Command("control"))
 async def cmd_control(message: Message, state: FSMContext = None):
     """🟡 Команда control - запрос контроля оплаты"""
@@ -2023,9 +2218,102 @@ async def cmd_control(message: Message, state: FSMContext = None):
         crm_number = "-"
         log_func(f"/control без примечаний: {command_text}")
     
-    await message.reply(f"🟡 Запрос на контроль оплаты принят.\nПримечание: {crm_number}\n\nОператоры уведомлены.\nОжидайте подтверждения получения транзакции.")
-    log_func("Отправлено сообщение с принятием контроля")
-    await process_control_request(message, crm_number)
+    # Получаем все заявки со статусом "создана" для этого чата
+    if not db.pool:
+        await message.reply("❌ Ошибка: база данных недоступна.")
+        return
+    
+    # Делаем недействительными старые сообщения с кнопками control в этом чате
+    try:
+        # Получаем последние сообщения бота в чате и делаем недействительными те, что содержат кнопки control
+        async for msg in message.bot.get_chat_history(chat_id=message.chat.id, limit=10):
+            if (msg.from_user and msg.from_user.id == message.bot.id and 
+                msg.reply_markup and any(btn.callback_data and btn.callback_data.startswith("control_") 
+                                       for row in msg.reply_markup.inline_keyboard for btn in row)):
+                try:
+                    # Убираем кнопки и добавляем текст о незавершенной команде
+                    current_text = msg.text or msg.caption or ""
+                    new_text = current_text + "\n\n** ℹ️ КОМАНДА КОНТРОЛЬ НЕ ЗАВЕРШЕНА МЕНЕДЖЕРОМ ℹ️ ВЫЗВАНА НОВАЯ КОМАНДА КОНТРОЛЬ**"
+                    await message.bot.edit_message_text(
+                        chat_id=message.chat.id,
+                        message_id=msg.message_id,
+                        text=new_text,
+                        reply_markup=None  # Убираем все кнопки
+                    )
+                    log_func(f"Сделано недействительным старое сообщение с кнопками control: {msg.message_id}")
+                except Exception as e:
+                    log_func(f"Не удалось сделать недействительным старое сообщение {msg.message_id}: {e}")
+    except Exception as e:
+        log_func(f"Ошибка при обработке старых сообщений: {e}")
+    
+    async with db.pool.acquire() as conn:
+        created_orders = await conn.fetch('''
+            SELECT transaction_number, rub_amount, idr_amount
+            FROM "VSEPExchanger"."transactions"
+            WHERE source_chat = $1 AND status = 'created'
+            ORDER BY status_changed_at
+        ''', str(chat.id))
+    
+    if not created_orders:
+        await message.reply("❌ Нет активных заявок для контроля.\n\nСначала создайте заявку командой /check")
+        return
+    
+    # Создаем кнопки для каждой заявки
+    keyboard_buttons = []
+    for order in created_orders:
+        transaction_number = order['transaction_number']
+        rub_amount = int(order['rub_amount']) if order['rub_amount'] else 0
+        idr_amount = int(order['idr_amount']) if order['idr_amount'] else 0
+        
+        # Форматируем суммы для отображения
+        rub_formatted = f"{rub_amount:,}".replace(",", " ")
+        idr_formatted = f"{idr_amount:,}".replace(",", " ")
+        
+        button_text = f"💰 {rub_formatted} RUB | {idr_formatted} IDR | #{transaction_number}"
+        callback_data = f"control_order_{transaction_number}"
+        
+        keyboard_buttons.append([InlineKeyboardButton(text=button_text, callback_data=callback_data)])
+    
+    # Добавляем кнопку отмены
+    keyboard_buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="control_cancel")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    base_text = (
+        f"🟡 Выберите заявку для контроля:\n\n"
+        f"📝 Примечание: {crm_number}\n\n"
+        f"Нажмите на кнопку с заявкой, соответствующей вашему чеку:")
+    await state.set_state(ControlStates.waiting_for_order_selection)
+    await state.update_data(crm_number=crm_number, original_message_id=message.message_id, owner_id=message.from_user.id, base_text=base_text)
+    
+    msg = await message.reply(
+        base_text,
+        reply_markup=keyboard
+    )
+    log_func("Отправлено сообщение с кнопками выбора заявки")
+    
+    # Если есть старое сообщение — обновляем его и убираем из dict
+    old_msg_id = active_control_message[message.chat.id]
+    if old_msg_id and old_msg_id != msg.message_id:
+        try:
+            old_msg = await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=old_msg_id,
+                text=base_text + "\n\n** ℹ️ КОМАНДА КОНТРОЛЬ НЕ ЗАВЕРШЕНА МЕНЕДЖЕРОМ ℹ️ ВЫЗВАНА НОВАЯ КОМАНДА КОНТРОЛЬ**",
+                reply_markup=None
+            )
+            log_func(f"Сделано недействительным старое сообщение с кнопками control: {old_msg_id}")
+        except Exception as e:
+            log_func(f"Не удалось сделать недействительным старое сообщение {old_msg_id}: {e}")
+
+    # Записываем новый message_id
+    active_control_message[message.chat.id] = msg.message_id
+    
+    # Запускаем задачу для автоматического устаревания кнопок через 1 минуту
+    task = asyncio.create_task(expire_control_buttons(message.bot, message.chat.id, message.message_id + 1, 60, base_text=base_text))  # +1 потому что reply
+    
+    # Сохраняем задачу в состоянии для возможности отмены
+    await state.update_data(expire_task=task)
 
 @router.message(Command("report"))
 async def cmd_report(message: Message):
@@ -2176,3 +2464,183 @@ async def cmd_report(message: Message):
 
     # Отправляем отчет
     await message.reply(final_report, parse_mode="HTML", reply_markup=reply_markup)
+
+def register_handlers(dp: Dispatcher):
+    """Регистрация всех обработчиков"""
+    print("[DEBUG] register_handlers: начало регистрации")
+    
+    # Сначала подключаем основной роутер
+    print("[DEBUG] register_handlers: подключаю основной роутер")
+    dp.include_router(router)
+    print("[DEBUG] register_handlers: основной роутер подключен")
+    
+    # Затем подключаем роутер для банковских операций
+    print("[DEBUG] register_handlers: подключаю банковский роутер")
+    dp.include_router(bank_router)
+    print("[DEBUG] register_handlers: банковский роутер подключен")
+    
+    # Регистрируем остальные callback обработчики напрямую в диспетчер
+    dp.callback_query.register(force_open_callback, lambda c: c.data in ["force_open_yes", "force_open_no"])
+    dp.callback_query.register(force_close_callback, lambda c: c.data in ["force_close_yes", "force_close_no"])
+    dp.callback_query.register(admin_add_confirm_callback, F.data.startswith("admin_add_confirm:"))
+    dp.callback_query.register(admin_add_cancel_callback, F.data.startswith("admin_add_cancel:"))
+    dp.callback_query.register(admin_remove_confirm_callback, F.data.startswith("admin_remove_confirm:"))
+    dp.callback_query.register(admin_remove_cancel_callback, F.data.startswith("admin_remove_cancel:"))
+    dp.callback_query.register(operator_add_confirm_callback, F.data.startswith("operator_add_confirm:"))
+    dp.callback_query.register(operator_add_cancel_callback, F.data.startswith("operator_add_cancel:"))
+    dp.callback_query.register(operator_remove_confirm_callback, F.data.startswith("operator_remove_confirm:"))
+    dp.callback_query.register(operator_remove_cancel_callback, F.data.startswith("operator_remove_cancel:"))
+    dp.callback_query.register(rate_change_confirm, F.data=="rate_change_confirm")
+    dp.callback_query.register(rate_change_cancel, F.data=="rate_change_cancel")
+    dp.callback_query.register(report_callback_handler, F.data.regexp(r"^report_(bill|cancel)_"))
+    dp.callback_query.register(control_callback_handler, F.data.startswith("control_"))
+    
+    # Регистрируем обработчик для ввода суммы
+    dp.message.register(handle_input_sum, lambda m: m.text and m.text.strip().startswith("/") and (m.text[1:].isdigit() or (m.text[1:].startswith("-") and m.text[2:].isdigit())))
+    
+    print("[DEBUG] register_handlers: регистрация завершена")
+
+async def _toggle_info_flag(message: Message, flag_name: str, chat_type: str):
+    """(Superadmin) Включить/выключить информационное сообщение для чата."""
+    user = message.from_user
+    chat_id = message.chat.id
+
+    logger.info(f"[{flag_name.upper()}] Команда /toggle_info_{chat_type.lower()} вызвана пользователем {user.id} (@{user.username}) в чате {chat_id}")
+
+    # Проверяем права (только суперадмин)
+    if not await is_superadmin(user.id):
+        logger.warning(f"[{flag_name.upper()}] Отказ в доступе для пользователя {user.id} - недостаточно прав")
+        await message.reply("🚫 Не выполнено.\nПРИЧИНА: команда доступна только суперадмину.")
+        return
+
+    logger.info(f"[{flag_name.upper()}] Права доступа подтверждены для пользователя {user.id}")
+
+    try:
+        # Используем специальный метод для переключения системной настройки
+        new_state = await db.toggle_system_setting(flag_name)
+        
+        # Обновляем системные настройки в памяти
+        await system_settings.load()
+        
+        status_text = "включен ✅" if new_state else "выключен ❌"
+        response_text = f"Информационный скрипт для чата {chat_type} успешно {status_text}"
+        
+        await message.reply(response_text)
+        logger.info(f"[{flag_name.upper()}] Статус изменен на {new_state} пользователем {user.id}")
+
+    except Exception as e:
+        logger.error(f"[{flag_name.upper()}] Ошибка при переключении флага: {e}")
+        await message.reply("❌ Произошла ошибка при изменении настройки.")
+
+
+@router.message(Command("toggle_info_mbt"))
+async def cmd_toggle_info_mbt(message: Message):
+    """(Superadmin) Включить/выключить информационное сообщение для MBT"""
+    await _toggle_info_flag(message, "send_info_mbt", "MBT")
+
+@router.message(Command("toggle_info_lgi"))
+async def cmd_toggle_info_lgi(message: Message):
+    """(Superadmin) Включить/выключить информационное сообщение для LGI"""
+    await _toggle_info_flag(message, "send_info_lgi", "LGI")
+
+@router.message(Command("toggle_info_tct"))
+async def cmd_toggle_info_tct(message: Message):
+    """(Superadmin) Включить/выключить информационное сообщение для TCT"""
+    await _toggle_info_flag(message, "send_info_tct", "TCT")
+
+async def expire_control_buttons(bot: Bot, chat_id: int, message_id: int, delay_seconds: int, base_text: str = ""):
+    """Автоматическое устаревание кнопок control через указанное время"""
+    await asyncio.sleep(delay_seconds)
+    
+    try:
+        # Используем base_text если передан, иначе стандартный текст
+        if not base_text:
+            base_text = "🟡 Выберите заявку для контроля:\n\n📝 Примечание: ...\n\nНажмите на кнопку с заявкой, соответствующей вашему чеку:"
+        base_text = str(base_text)
+        new_text = base_text + "\n\n** ℹ️ КОМАНДА КОНТРОЛЬ НЕ ЗАВЕРШЕНА МЕНЕДЖЕРОМ ℹ️ СРОК ЖИЗНИ КНОПОК ЗАКОНЧИЛСЯ**"
+        
+        # Убираем кнопки и обновляем текст
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=new_text,
+            reply_markup=None  # Убираем все кнопки
+        )
+        # Очищаем message_id
+        active_control_message[chat_id] = None
+        
+        log_func(f"Кнопки control истекли для сообщения {message_id} в чате {chat_id}")
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "message to edit not found" in error_msg or "message not found" in error_msg:
+            log_func(f"Сообщение {message_id} уже удалено или недоступно для редактирования")
+        else:
+            log_error(f"Ошибка при истечении кнопок control: {e}")
+
+# === CALLBACK HANDLER для кнопки Принять ===
+@router.callback_query(lambda c: c.data.startswith("accept_order_"))
+async def accept_order_callback(call: CallbackQuery, state: FSMContext):
+    transaction_number = call.data.split("_")[-1]
+    user_id = call.from_user.id
+    # Проверка прав
+    user_rank = await db.get_user_rank(user_id)
+    if user_rank not in ("operator", "admin", "superadmin"):
+        await call.answer("Только оператор и админ Сервиса могут подтвердить!", show_alert=True)
+        return
+    # Получаем заявку
+    transaction = await db.get_transaction_by_number(transaction_number)
+    if not transaction:
+        await call.answer("Заявка не найдена.", show_alert=True)
+        return
+    if transaction.get('status') != "control":
+        await call.answer(f"Заявка не на контроле (статус: {transaction.get('status')})", show_alert=True)
+        return
+    # Обновляем статус и историю
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.update_transaction_status(transaction_number, "accept", now_utc)
+    # Формируем запись в history
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    user_nick = f"@{call.from_user.username}" if call.from_user.username else call.from_user.full_name
+    # Используем ID сообщения с кнопкой для ссылки в истории
+    msg_id = call.message.message_id
+    chat_id = call.message.chat.id
+    if call.message.chat.username:
+        link_accept = f"https://t.me/{call.message.chat.username}/{msg_id}"
+    else:
+        chat_id_num = str(chat_id)
+        if chat_id_num.startswith('-100'):
+            chat_id_num = chat_id_num[4:]
+        elif chat_id_num.startswith('-'):
+            chat_id_num = chat_id_num[1:]
+        link_accept = f"https://t.me/c/{chat_id_num}/{msg_id}"
+    accept_entry = f"{now_str}${user_nick}$accept${link_accept}"
+    old_history = transaction.get('history', '')
+    history = old_history + "%%%" + accept_entry if old_history else accept_entry
+    await db.update_transaction_history(transaction_number, history)
+    # Удаляем кнопку и подписываем сообщение
+    operator_name = call.from_user.full_name
+    operator_username = f"@{call.from_user.username}" if call.from_user.username else ""
+    operator_info = f"{operator_name} {operator_username}".strip()
+    
+    new_text = call.message.text + f"\n\n✅ Заявка была акцептована.\n👤 оператор: {operator_info}\n🕐 время: {now_str}"
+    await call.message.edit_text(new_text, reply_markup=None)
+    await call.answer("Заявка акцептована!")
+    
+    # Отправляем отдельное уведомление в чат о подтверждении платежа
+    rub_amount = int(transaction['rub_amount']) if transaction['rub_amount'] else 0
+    idr_amount = int(transaction['idr_amount']) if transaction['idr_amount'] else 0
+    rub_formatted = f"{rub_amount:,}".replace(",", " ")
+    idr_formatted = f"{idr_amount:,}".replace(",", " ")
+    
+    notification_text = (
+        f"✅ **ТРАНЗАКЦИЯ ПОДТВЕРЖДЕНА!**\n\n"
+        f"📋 Номер заявки: <code>{transaction_number}</code>\n"
+        f"💰 Сумма: {rub_formatted} RUB | {idr_formatted} IDR\n"
+        f"👤 Подтвердил: {operator_info}\n"
+        f"🕐 Время: {now_str}\n\n"
+        f"🔵 Статус заявки: <b>ПОДТВЕРЖДЕНА</b>"
+    )
+    
+    await call.message.answer(notification_text, parse_mode="HTML")
