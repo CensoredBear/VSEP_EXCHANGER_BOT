@@ -19,7 +19,7 @@ async def safe_send_media_with_caption(
     reply_to_message_id: Optional[int] = None
 ):
     """
-    Tries to send a media file by file_id, first as video, then as photo.
+    Tries to send a media file by file_id, using the appropriate method based on media type.
     Falls back to sending a text message if sending media fails.
     """
     try:
@@ -33,16 +33,23 @@ async def safe_send_media_with_caption(
 
         logger.info(f"[MEDIA_ATTEMPT] Trying to send media {media_id} (type: {media_type}) to {chat_id}")
 
-        if media_type in ['video', 'animation']:
+        # Отправляем анимации (GIF) через send_animation
+        if media_type == 'animation':
+            try:
+                await bot.send_animation(chat_id, animation=media_id, caption=caption, parse_mode=parse_mode, reply_markup=reply_markup, reply_to_message_id=reply_to_message_id)
+                return
+            except TelegramBadRequest as e:
+                logger.warning(f"[MEDIA_RETRY] Failed to send {media_id} as animation, trying as photo. Error: {e.message}")
+        
+        # Отправляем видео через send_video
+        elif media_type == 'video':
             try:
                 await bot.send_video(chat_id, video=media_id, caption=caption, parse_mode=parse_mode, reply_markup=reply_markup, reply_to_message_id=reply_to_message_id)
                 return
             except TelegramBadRequest as e:
-                if 'wrong file identifier' in e.message.lower() or 'wrong type of file' in e.message.lower():
-                    logger.warning(f"[MEDIA_RETRY] Failed to send {media_id} as video, trying as photo. Error: {e.message}")
-                else:
-                    raise e
+                logger.warning(f"[MEDIA_RETRY] Failed to send {media_id} as video, trying as photo. Error: {e.message}")
         
+        # Для всех остальных типов (включая photo и неизвестные) используем send_photo
         await bot.send_photo(chat_id, photo=media_id, caption=caption, parse_mode=parse_mode, reply_markup=reply_markup, reply_to_message_id=reply_to_message_id)
 
     except (TelegramBadRequest, ValidationError) as e:
