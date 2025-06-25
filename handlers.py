@@ -380,7 +380,7 @@ async def report_callback_handler(call: CallbackQuery):
          col1 = 15
          col2 = 12
          col3 = 12
-         header = '<b>СФОРМИРОВАН СЧЕТ НА ВЫПЛАТУ:</b>\n'
+         header = '<b>🟣 СФОРМИРОВАН СЧЕТ НА ВЫПЛАТУ:</b>\n'
          header += f"<code>Количество заказов: {len(rows)}</code>\n"
          header += f"<code>Сумма: {fmt_0(total_idr)} IDR</code>\n\n"
          header += '<b>Список заказов:</b>\n'
@@ -1373,7 +1373,7 @@ async def cmd_transfer(message: Message):
         log_error(f"Ошибка при записи в Google Sheets: {e}")
         # Продолжаем выполнение, даже если Google Sheets недоступен
 
-    await progress_msg.edit_text(f"✅ ТРАНСФЕР ВЫПОЛНЕН!\n\nПодтверждена оплата {order_count} ордеров на сумму {fmt_0(total_idr)} IDR", parse_mode="HTML")
+    await progress_msg.edit_text(f"🟢 ТРАНСФЕР ВЫПОЛНЕН!\n\nПодтверждена выплата {order_count} ордеров на сумму {fmt_0(total_idr)} IDR", parse_mode="HTML")
 
 @router.message(Command("rate_change"))
 async def cmd_rate_change(message: Message, state: FSMContext):
@@ -1921,7 +1921,7 @@ async def cmd_control(message: Message, state: FSMContext = None):
         crm_number = "-"
         log_func(f"/control без примечаний: {command_text}")
     
-    await message.reply(f"✅ ПРИНЯТО!\n\nЗапрос на контроль оплаты принят.\nПримечание: {crm_number}\n\nОператоры уведомлены.")
+    await message.reply(f"🟡 ПРИНЯТО!\n\nЗапрос на контроль оплаты принят.\nПримечание: {crm_number}\n\nОператоры уведомлены.")
     log_func("Отправлено сообщение с принятием контроля")
     await process_control_request(message, crm_number)
 
