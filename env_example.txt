@@ -1,0 +1,31 @@
+# Bot Token
+VSEP_BOT_TOKEN=your_bot_token_here
+CB_VSP_BOT_TOKEN=your_bot_token_here
+
+# Chat IDs
+CHAT_ID_01=123456789
+CHAT_ID_02=123456789
+CHAT_ID_03=123456789
+CHAT_ID_04=123456789
+CHAT_ID_05=123456789
+CHAT_ID_06=123456789
+CHAT_ID_07=123456789
+
+# Groups
+VSEP_ADMIN_GROUP=@admin_group
+VSEP_WORK_GROUP_MBT=@work_group_mbt
+VSEP_WORK_GROUP_LGI=@work_group_lgi
+VSEP_WORK_GROUP_TCT=@work_group_tct
+
+# Database
+CBCLUB_DB_URL=postgresql://user:password@localhost/dbname
+
+# Google Sheets
+GOOGLE_SHEETS_CREDENTIALS_PATH=credentials.json
+GOOGLE_SHEETS_SPREADSHEET_URL=https://docs.google.com/spreadsheets/d/your_sheet_id
+GOOGLE_SHEETS_CHAT_TABLE_MAP=chat_table_map
+GOOGLE_TABLE_CREDS={"type": "service_account"}
+
+# Other
+PHOTO_ID=your_photo_id
+LOG_FILE=logs/bot.log 
