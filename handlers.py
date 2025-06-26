@@ -43,12 +43,17 @@ from config import config, system_settings
 from google_sync import write_to_google_sheet_async, write_multiple_to_google_sheet
 from utils import fmt_0, fmt_2, fmt_delta
 from commands.accept import router as accept_router
+from commands.joke import router as joke_router
+from commands.dice import router as dice_router
+from commands.coin import router as coin_router
+from commands.meme import router as meme_router
 import time
 import asyncio
 from aiogram.exceptions import TelegramBadRequest, TelegramMigrateToChat
 import json
 from collections import defaultdict
 from joke_parser import get_joke, get_joke_with_source
+from commands.joke import router as joke_router
 
 # Создаем роутер для всех обработчиков
 router = Router()
@@ -2273,6 +2278,26 @@ def register_handlers(dp: Dispatcher):
     dp.include_router(accept_router)
     print("[DEBUG] register_handlers: accept роутер подключен")
     
+    # Подключаем роутер для команды joke
+    print("[DEBUG] register_handlers: подключаю joke роутер")
+    dp.include_router(joke_router)
+    print("[DEBUG] register_handlers: joke роутер подключен")
+    
+    # Подключаем роутер для команды dice
+    print("[DEBUG] register_handlers: подключаю dice роутер")
+    dp.include_router(dice_router)
+    print("[DEBUG] register_handlers: dice роутер подключен")
+    
+    # Подключаем роутер для команды coin
+    print("[DEBUG] register_handlers: подключаю coin роутер")
+    dp.include_router(coin_router)
+    print("[DEBUG] register_handlers: coin роутер подключен")
+    
+    # Подключаем роутер для команды meme
+    print("[DEBUG] register_handlers: подключаю meme роутер")
+    dp.include_router(meme_router)
+    print("[DEBUG] register_handlers: meme роутер подключен")
+    
     # Регистрируем остальные callback обработчики напрямую в диспетчер
     dp.callback_query.register(force_open_callback, lambda c: c.data in ["force_open_yes", "force_open_no"])
     dp.callback_query.register(force_close_callback, lambda c: c.data in ["force_close_yes", "force_close_no"])
@@ -2414,6 +2439,15 @@ async def accept_order_callback(call: CallbackQuery, state: FSMContext):
     old_history = transaction.get('history', '')
     history = old_history + "%%%" + accept_entry if old_history else accept_entry
     await db.update_transaction_history(transaction_number, history)
+    
+    # --- Уменьшаем счетчик контроля ---
+    counter = await db.get_control_counter(chat_id)
+    if counter > 0:
+        await db.set_control_counter(chat_id, counter - 1)
+        from logger import log_func, log_db
+        key = f"{chat_id}_control_counter"
+        log_func(f"Счетчик контроля для чата {chat_id} (ключ: {key}) уменьшен: {counter} -> {counter-1}")
+        log_db(f"[DB] set_system_setting: {key} = {counter-1}")
     
     # Удаляем кнопку и подписываем сообщение с активной ссылкой
     operator_name = call.from_user.full_name
