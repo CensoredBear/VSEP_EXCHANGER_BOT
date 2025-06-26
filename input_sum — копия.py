@@ -258,7 +258,9 @@ async def handle_input_sum(message: TgMessage):
             msg += "<blockquote>При оплате заказов с использованием иностранной валюты нам помогают партнеры из Программы Верифицированных Сервисов БалиФорума (https://t.me/balichatexchange/55612) - безопасность при обмене валют и оплате услуг на Бали и в Тайланде.</blockquote>\n"
             msg += "────⋆⋅☆⋅⋆────\n"
             msg += f"❮❮❮ <b><code>{transaction_number}</code></b> {times[3]} (Bali)"
-            # Перед каждым итерированием по accounts
+            # Пример для итерирования по accounts:
+            if accounts is None:
+                accounts = []
             if not isinstance(accounts, list) or not accounts:
                 log_error('handle_input_sum: accounts отсутствуют или не список!')
                 accounts = []
@@ -385,6 +387,9 @@ async def handle_input_sum(message: TgMessage):
         msg += f"Необходимо отправить:\n"
         msg += f"                        🇷🇺 <b>{rub_amount:,} RUB</b>\n"
         acc_lines = acc_text.split("\n") if acc_text else []
+        # Пример для итерирования по acc_lines:
+        if acc_lines is None:
+            acc_lines = []
         if not isinstance(acc_lines, list) or not acc_lines:
             log_error('handle_input_sum: acc_lines отсутствует или не список!')
             acc_lines = []
@@ -637,8 +642,8 @@ def is_night_shift() -> bool:
     shift_end = system_settings.shift_end_time
     
     # Парсим время из строки формата "HH:MM"
-    start_hour, start_minute = map(int, shift_start.split(':'))
-    end_hour, end_minute = map(int, shift_end.split(':'))
+    start_hour, start_minute = map(int, str(shift_start).split(':'))
+    end_hour, end_minute = map(int, str(shift_end).split(':'))
     
     # Создаем объекты time для сравнения
     start_time = time(start_hour, start_minute)

@@ -392,10 +392,9 @@ async def process_control_request_with_order(message: Message, crm_number: str, 
         rub_formatted = f"{rub_amount:,}".replace(",", " ")
         idr_formatted = f"{idr_amount:,}".replace(",", " ")
         
-        notify_text = f"""<b>⚠️ ВНИМАНИЮ ОПЕРАТОРОВ ⚠️:</b> 
-👨‍💻 {operators_text}
+        notify_text = f"""<b>⚠️ ВНИМАНИЮ ОПЕРАТОРОВ ⚠️:</b> {operators_text}
 
-⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b>
+▒░ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b> ░▒
 • из чата: <code>{chat_title}</code>
 • <b>Автор:</b> <code>{user_nick}</code>
 
