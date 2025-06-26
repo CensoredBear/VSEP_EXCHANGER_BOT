@@ -456,7 +456,7 @@ async def handle_input_sum(message: TgMessage):
         msg += f"                        🇷🇺 <b>{rub_amount:,} RUB</b>\n"
         acc_lines = acc_text.split("\n")
         for (i, line) in enumerate(acc_lines, 1):
-            (bank, card, rec, sbp) = (line.split(" ")[0], line.split(" ")[1], " ".join(line.split(" ")[2:-1]), line.split(" ")[-1])
+            (card, bank, rec, sbp) = (line.split(" ")[0], line.split(" ")[1], " ".join(line.split(" ")[2:-1]), line.split(" ")[-1])
             msg += f"<blockquote>➤ Перевод в {bank}\n"
             msg += f"➤ Карта: {card}\n"
             msg += f"➤ Получатель: {rec}\n"

@@ -15,7 +15,7 @@ async def safe_send_media_with_caption(
     file_id: Optional[Dict[str, str]], 
     caption: str, 
     parse_mode: str = 'HTML', 
-    reply_markup: InlineKeyboardMarkup = None,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
     reply_to_message_id: Optional[int] = None
 ):
     """
