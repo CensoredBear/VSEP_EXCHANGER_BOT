@@ -396,17 +396,17 @@ async def process_control_request_with_order(message: Message, crm_number: str, 
 👨‍💻 {operators_text}
 
 ⚜️ <b>ЗАПРОС КОНТРОЛЯ ОПЛАТЫ</b>
-    из чата: <code>{chat_title}</code>
-👤 <b>Автор:</b> <code>{user_nick}</code>
+• из чата: <code>{chat_title}</code>
+• <b>Автор:</b> <code>{user_nick}</code>
 
-📋 <b>Номер заявки:</b> <code>#{transaction_number}</code>
-💰 <b>Сумма:</b> <code>{rub_formatted} RUB | {idr_formatted} IDR</code>
-📝 <b>Примечание:</b> <code>{crm_number}</code>
-🟡 <b>Статус заявки:</b> НА КОНТРОЛЕ
+• <b>Номер заявки:</b> <code>#{transaction_number}</code>
+• <b>Сумма:</b> <code>{rub_formatted} RUB | {idr_formatted} IDR</code>
+• <b>Примечание:</b> <code>{crm_number}</code>
+• <b>Статус заявки:</b> НА КОНТРОЛЕ
 
 {counters_text}
 
-🔗 <b>Ссылка на запрос:</b>
+• <b>Ссылка на запрос:</b>
 ➖➖➖➖➖➖➖➖➖➖➖➖➖
 ☑ <b><a href='{link}'>ПЕРЕЙТИ К ЗАПРОСУ</a></b> ☑
 ➖➖➖➖➖➖➖➖➖➖➖➖➖
@@ -579,9 +579,9 @@ async def control_callback_handler(call: CallbackQuery, state: FSMContext):
                 
                 control_message = (
                     f"🟡 Заявка отправлена на контроль!\n\n"
-                    f"📋 Номер заявки: <code>{transaction_number}</code>\n"
-                    f"💰 Сумма: {rub_formatted} RUB | {idr_formatted} IDR\n"
-                    f"📝 Примечание: {crm_number}\n"
+                    f"• Номер заявки: <code>{transaction_number}</code>\n"
+                    f"• Сумма: {rub_formatted} RUB | {idr_formatted} IDR\n"
+                    f"• Примечание: {crm_number}\n"
                     f"🟡 Статус заявки: <b>НА КОНТРОЛЕ</b>\n\n"
                     f"Операторы уведомлены.\nОжидайте подтверждения получения транзакции."
                 )
@@ -2657,10 +2657,10 @@ async def accept_order_callback(call: CallbackQuery, state: FSMContext):
     
     notification_text = (
         f"✅ **ТРАНЗАКЦИЯ ПОДТВЕРЖДЕНА!**\n\n"
-        f"📋 Номер заявки: <code>{transaction_number}</code>\n"
-        f"💰 Сумма: {rub_formatted} RUB | {idr_formatted} IDR\n"
-        f"👤 Подтвердил: {operator_info}\n"
-        f"🕐 Время: {now_str}\n\n"
+        f"• Номер заявки: <code>{transaction_number}</code>\n"
+        f"• Сумма: {rub_formatted} RUB | {idr_formatted} IDR\n"
+        f"• Подтвердил: {operator_info}\n"
+        f"• Время: {now_str}\n\n"
         f"🔵 Статус заявки: <b>ПОДТВЕРЖДЕНА</b>"
     )
     
@@ -2740,10 +2740,10 @@ async def cmd_zombie(message: Message, state: FSMContext):
     # Формируем сообщение подтверждения
     confirm_text = (
         f"🧟‍♂️ <b>ПОДТВЕРЖДЕНИЕ РЕАНИМАЦИИ ЗАЯВКИ</b>\n\n"
-        f"📋 <b>Номер заявки:</b> <code>{transaction_number}</code>\n"
-        f"📅 <b>Дата создания:</b> {created_date}\n"
-        f"💰 <b>Сумма:</b> {rub_formatted} RUB ({idr_formatted} IDR)\n"
-        f"🏦 <b>Реквизиты:</b> {account_info}\n\n"
+        f"• <b>Номер заявки:</b> <code>{transaction_number}</code>\n"
+        f"• <b>Дата создания:</b> {created_date}\n"
+        f"• <b>Сумма:</b> {rub_formatted} RUB ({idr_formatted} IDR)\n"
+        f"• <b>Реквизиты:</b> {account_info}\n\n"
         f"⚠️ <b>Подтвердите, что вы хотите перевести эту заявку из статуса <i>timeout</i> в статус <i>created</i></b>\n\n"
         f"👤 <b>Оператор:</b> {message.from_user.full_name}"
     )
@@ -2852,7 +2852,7 @@ async def zombie_callback_handler(call: CallbackQuery, state: FSMContext):
             # Обновляем сообщение
             success_text = (
                 f"👻 <b>ЗАЯВКА ОЖИВЛЕНА!</b>\n\n"
-                f"📋 <b>Номер заявки:</b> <code>{transaction_number}</code>\n"
+                f"📋 <b></b> <code>{transaction_number}</code>\n"
                 f"💰 <b>Сумма:</b> {rub_formatted} RUB ({idr_formatted} IDR)\n"
                 f"👤 <b>Оживил:</b> {user_nick}\n"
                 f"🕐 <b>Время:</b> {now_str}\n\n"

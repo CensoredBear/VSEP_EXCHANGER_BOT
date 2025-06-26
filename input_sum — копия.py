@@ -8,24 +8,41 @@ from messages import send_message, get_bali_and_msk_time_list
 from db import db
 from logger import logger, log_system, log_user, log_func, log_db, log_warning, log_error
 from google_sync import write_to_google_sheet_async
-from utils import safe_send_photo_with_caption
+from utils import safe_send_media_with_caption
 # from globals import config_Pads, ChatDataPad, MessagePad
 
 """ Команда /число или /-число"""
 async def handle_input_sum(message: TgMessage):
-    log_func(f"Вызвана handle_input_sum пользователем {message.from_user.id} (@{message.from_user.username}) в чате {message.chat.id}")
-    text = message.text.strip()
+    user = getattr(message, 'from_user', None)
+    chat = getattr(message, 'chat', None)
+    bot = getattr(message, 'bot', None)
+    if user is None or chat is None:
+        log_error('handle_input_sum: user или chat отсутствует в message!')
+        return
+    user_id = getattr(user, 'id', None)
+    user_username = getattr(user, 'username', None)
+    user_full_name = getattr(user, 'full_name', None)
+    chat_id = getattr(chat, 'id', None)
+    chat_title = getattr(chat, 'title', None)
+    chat_full_name = getattr(chat, 'full_name', None)
+    chat_username = getattr(chat, 'username', None)
+    if bot is None:
+        log_error('handle_input_sum: bot отсутствует в message!')
+        return
+    if chat_id is None:
+        log_error('handle_input_sum: chat_id отсутствует!')
+        return
+    log_func(f"Вызвана handle_input_sum пользователем {user_id} (@{user_username}) в чате {chat_id}")
+    text = message.text.strip() if message.text else ''
     if not text.startswith("/"):
-        log_user(f"Пользователь {message.from_user.id} отправил некомандное сообщение: {text}")
+        log_user(f"Пользователь {user_id} отправил некомандное сообщение: {text}")
         return
     num_part = text[1:]
     if not (num_part.isdigit() or (num_part.startswith("-") and num_part[1:].isdigit())):
         return
     value = int(num_part)
-    user = message.from_user
-    username = user.username or user.full_name or f"id{user.id}"
-    chat = message.chat
-    chat_title = chat.title or chat.full_name or str(chat.id)
+    username = user_username or user_full_name or f"id{user_id}"
+    chat_title_val = chat_title or chat_full_name or str(chat_id)
     MAX_ALLOWED = 999_999_999
     MIN_ALLOWED = -999_999_999
     if value > MAX_ALLOWED or value < MIN_ALLOWED:
@@ -80,7 +97,7 @@ async def handle_input_sum(message: TgMessage):
         hour = now.strftime('%H')
         minute = now.strftime('%M')
         ms = f"{now.microsecond // 1000:03d}"
-        user_id_str = str(user.id)[-3:].zfill(3)
+        user_id_str = str(user_id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
         transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
@@ -90,7 +107,7 @@ async def handle_input_sum(message: TgMessage):
         acc_info = "ночной запрос"
         log = ""
         now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        user_nick = f"@{user.username}" if user.username else user.full_name
+        user_nick = f"@{user_username}" if user_username else user_full_name
         chat_id = message.chat.id
         msg_id = message.message_id
         if message.chat.username:
@@ -106,7 +123,7 @@ async def handle_input_sum(message: TgMessage):
         source_chat = str(chat_id)
         await db.add_transaction(
             transaction_number=transaction_number,
-            user_id=user.id,
+            user_id=user_id,
             created_at=created_at,
             idr_amount=idr_amount,
             rate_used=used_rate,
@@ -134,12 +151,14 @@ async def handle_input_sum(message: TgMessage):
 ➤ СБП: —</blockquote>
 ⚠️ Реквизиты выдаются с 09:00 до 23:00 по балийскому времени. Сейчас на Бали: {bali_time}
 Расчет информационный, оплата невозможна."""
-        await send_message(
-            bot=message.bot,
-            chat_id=message.chat.id,
-            text=msg,
-            reply_to_message_id=message.message_id,
-            parse_mode="HTML"
+        # safe_send_media_with_caption только с гарантированно не-None bot и chat_id
+        await safe_send_media_with_caption(
+            bot=bot,
+            chat_id=chat_id,
+            file_id=system_settings.media_mbt,
+            caption=msg.replace(",", " "),
+            parse_mode="HTML",
+            reply_to_message_id=message.message_id
         )
         log_func("Пользователю отправлено сообщение о сумме (ночная смена)")
         return
@@ -154,8 +173,12 @@ async def handle_input_sum(message: TgMessage):
     except Exception:
         speclimit = None
     if value > 0 or value < 0:
-        user_rank = await db.get_user_rank(message.from_user.id)
-        logger.info(f"[MSG] chat_id={message.chat.id}; user_id={message.from_user.id}; username={message.from_user.username}; rank={user_rank}; action=received; text={message.text}")
+        if user_id is not None:
+            user_rank = await db.get_user_rank(user_id)
+        else:
+            log_error('handle_input_sum: user_id is None, не могу получить ранг пользователя')
+            return
+        logger.info(f"[MSG] chat_id={chat_id}; user_id={user_id}; username={user_username}; rank={user_rank}; action=received; text={text}")
         idr_amount = value
         limits_list = [float(limits['main_rate']), float(limits['rate1']), float(limits['rate2']), float(limits['rate3'])]
         rates_list = [float(rate['main_rate']), float(rate['rate1']), float(rate['rate2']), float(rate['rate3']), float(rate['rate4']), float(rate['rate_back'])]
@@ -180,7 +203,7 @@ async def handle_input_sum(message: TgMessage):
             hour = now.strftime('%H')
             minute = now.strftime('%M')
             ms = f"{now.microsecond // 1000:03d}"
-            user_id_str = str(user.id)[-3:].zfill(3)
+            user_id_str = str(user_id)[-3:].zfill(3)
             msg_id_last2 = str(message.message_id)[-2:].zfill(2)
             transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
             created_at = naive_now
@@ -190,7 +213,7 @@ async def handle_input_sum(message: TgMessage):
             acc_info = "обратный перевод"
             log = ""
             now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            user_nick = f"@{user.username}" if user.username else user.full_name
+            user_nick = f"@{user_username}" if user_username else user_full_name
             chat_id = message.chat.id
             msg_id = message.message_id
             if message.chat.username:
@@ -206,7 +229,7 @@ async def handle_input_sum(message: TgMessage):
             source_chat = str(chat_id)
             await db.add_transaction(
                 transaction_number=transaction_number,
-                user_id=user.id,
+                user_id=user_id,
                 created_at=created_at,
                 idr_amount=idr_amount,
                 rate_used=used_rate,
@@ -235,17 +258,40 @@ async def handle_input_sum(message: TgMessage):
             msg += "<blockquote>При оплате заказов с использованием иностранной валюты нам помогают партнеры из Программы Верифицированных Сервисов БалиФорума (https://t.me/balichatexchange/55612) - безопасность при обмене валют и оплате услуг на Бали и в Тайланде.</blockquote>\n"
             msg += "────⋆⋅☆⋅⋆────\n"
             msg += f"❮❮❮ <b><code>{transaction_number}</code></b> {times[3]} (Bali)"
-            await safe_send_photo_with_caption(message, system_settings.media_mbt, msg.replace(",", " "), "HTML")
-            logger.info(f"[BOT_MSG] chat_id={message.chat.id}; to_user={message.from_user.id}; action=bot_send; text={msg[:200]}")
+            # Перед каждым итерированием по accounts
+            if not isinstance(accounts, list) or not accounts:
+                log_error('handle_input_sum: accounts отсутствуют или не список!')
+                accounts = []
+            for acc in accounts:
+                if not acc or not acc.get('is_actual'):
+                    continue
+                # ... существующий код ...
+                pass
+            else:
+                log_error('handle_input_sum: accounts пуст или None')
+            msg += f"❮❮❮ <b><code>{transaction_number}</code></b> {times[3]} (Bali) \n\n"
+            # safe_send_media_with_caption только с гарантированно не-None bot и chat_id
+            await safe_send_media_with_caption(
+                bot=bot,
+                chat_id=chat_id,
+                file_id=system_settings.media_mbt,
+                caption=msg.replace(",", " "),
+                parse_mode="HTML",
+                reply_to_message_id=message.message_id
+            )
+            logger.info(f"[BOT_MSG] chat_id={chat_id}; to_user={user_id}; action=bot_send; text={msg[:200]}")
             admin_msg = (
-                f"Запрос на возврат от {username} из чата {chat_title} (id: {chat.id}):\n"
+                f"Запрос на возврат от {username} из чата {chat_title_val} (id: {chat_id}):\n"
                 f"Курс возврата: {used_rate:.2f}\n"
                 f"Сумма: {abs(idr_amount):,} IDR = {rub_amount:,} RUB\n"
                 f"Реквизиты: {acc_info}\n"
                 f"🟡 ЗАЯВКА №{transaction_number} занесена в базу в {times[3]} (Bali)"
             )
             admin_msg = admin_msg.replace(",", " ")
-            await message.bot.send_message(config.ADMIN_GROUP, admin_msg)
+            if isinstance(bot, Bot) and hasattr(bot, 'send_message') and callable(bot.send_message):
+                await bot.send_message(config.ADMIN_GROUP, admin_msg)
+            else:
+                log_error('handle_input_sum: bot.send_message отсутствует или bot не Bot!')
             logger.info(f"[BOT_MSG] chat_id={config.ADMIN_GROUP}; to_user=ADMIN_GROUP; action=bot_send; text={admin_msg[:200]}")
             return
         elif idr_amount <= limits_idr[0]:
@@ -285,7 +331,7 @@ async def handle_input_sum(message: TgMessage):
         hour = now.strftime('%H')
         minute = now.strftime('%M')
         ms = f"{now.microsecond // 1000:03d}"
-        user_id_str = str(user.id)[-3:].zfill(3)
+        user_id_str = str(user_id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
         transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
@@ -293,7 +339,7 @@ async def handle_input_sum(message: TgMessage):
         status_changed_at = naive_now
         note = ""
         # Формируем строку реквизитов для записи
-        if accounts:
+        if isinstance(accounts, list) and accounts:
             acc_info = " | ".join([
                 f"{a['bank']} - {a['card_number']} - {a['recipient_name']} - {a['sbp_phone']}" for a in accounts
             ])
@@ -303,7 +349,7 @@ async def handle_input_sum(message: TgMessage):
         # --- Запись в базу ---
         # Формируем первую запись в history
         now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        user_nick = f"@{user.username}" if user.username else user.full_name
+        user_nick = f"@{user_username}" if user_username else user_full_name
         # Формируем ссылку на сообщение
         chat_id = message.chat.id
         msg_id = message.message_id
@@ -320,7 +366,7 @@ async def handle_input_sum(message: TgMessage):
         source_chat = str(chat_id)
         await db.add_transaction(
             transaction_number=transaction_number,
-            user_id=user.id,
+            user_id=user_id,
             created_at=created_at,
             idr_amount=idr_amount,
             rate_used=used_rate,
@@ -338,13 +384,24 @@ async def handle_input_sum(message: TgMessage):
         msg += f"                        🇮🇩 <b>{idr_amount:,} IDR</b>\n"
         msg += f"Необходимо отправить:\n"
         msg += f"                        🇷🇺 <b>{rub_amount:,} RUB</b>\n"
-        acc_lines = acc_text.split("\n")
+        acc_lines = acc_text.split("\n") if acc_text else []
+        if not isinstance(acc_lines, list) or not acc_lines:
+            log_error('handle_input_sum: acc_lines отсутствует или не список!')
+            acc_lines = []
         for (i, line) in enumerate(acc_lines, 1):
-            (card, bank, rec, sbp) = (line.split(" ")[0], line.split(" ")[1], " ".join(line.split(" ")[2:-1]), line.split(" ")[-1])
-            msg += f"<blockquote>➤ Перевод в {bank}\n"
-            msg += f"➤ Карта: {card}\n"
-            msg += f"➤ Получатель: {rec}\n"
-            msg += f"➤ СБП СТРОГО в ✅{bank}✅: {sbp}</blockquote>\n"
+            if line is not None and isinstance(line, str):
+                parts = line.split(" ")
+                if len(parts) < 4:
+                    log_error(f'handle_input_sum: строка аккаунта некорректна: {line}')
+                    continue
+                card, bank, rec, sbp = parts[0], parts[1], " ".join(parts[2:-1]), parts[-1]
+                msg += f"<blockquote>➤ Перевод в {bank}\n"
+                msg += f"➤ Карта: {card}\n"
+                msg += f"➤ Получатель: {rec}\n"
+                msg += f"➤ СБП СТРОГО в ✅{bank}✅: {sbp}</blockquote>\n"
+            else:
+                log_error('handle_input_sum: line is None или не строка, split невозможен')
+                continue
         msg += "🙏 После оплаты ОБЯЗАТЕЛЬНО пришлите ЧЕК или СКРИН перевода с видимыми реквизитами получателя, отправителя и датой перевода.\n\n"
         msg += "⚠️ ВАЖНО:\n"
         msg += "- переводите деньги строго с личной карты\n"
@@ -354,28 +411,36 @@ async def handle_input_sum(message: TgMessage):
         msg += "<blockquote>При оплате заказов с использованием иностранной валюты нам помогают партнеры из Программы Верифицированных Сервисов БалиФорума (https://t.me/balichatexchange/55612) - безопасность при обмене валют и оплате услуг на Бали и в Тайланде.</blockquote>\n"
         msg += "────⋆⋅☆⋅⋆────\n"
         msg += f"❮❮❮ <b><code>{transaction_number}</code></b> {times[3]} (Bali)"
-        await safe_send_photo_with_caption(message, system_settings.media_mbt, msg.replace(",", " "), "HTML")
-        logger.info(f"[BOT_MSG] chat_id={message.chat.id}; to_user={message.from_user.id}; action=bot_send; text={msg[:200]}")
+        # safe_send_media_with_caption только с гарантированно не-None bot и chat_id
+        await safe_send_media_with_caption(
+            bot=bot,
+            chat_id=chat_id,
+            file_id=system_settings.media_mbt,
+            caption=msg.replace(",", " "),
+            parse_mode="HTML",
+            reply_to_message_id=message.message_id
+        )
+        logger.info(f"[BOT_MSG] chat_id={chat_id}; to_user={user_id}; action=bot_send; text={msg[:200]}")
         # Сразу после этого отправляем информационное сообщение
         # Получаем название компании из nickneim по chat_id среди rang='group'
         company_name = ""
-        try:
+        if hasattr(db, 'pool') and db.pool is not None:
             group_row = await db.pool.fetchrow(
                 'SELECT nickneim FROM "VSEPExchanger"."user" WHERE rang = $1 AND id = $2',
-                'group', message.chat.id
+                'group', chat_id
             )
-            if group_row and group_row['nickneim']:
-                nick = group_row['nickneim']
-                logger.info(f"[COMPANY_NAME] Original nick: {nick}")
-                if '_' in nick:
-                    parts = nick.split('_', 1)
-                    company_name = parts[1].strip() if len(parts) > 1 else nick.strip()
-                else:
-                    company_name = nick.strip()
-                    logger.info(f"[COMPANY_NAME] No dash, company_name: {company_name}")
-        except Exception as e:
-            logger.error(f"[COMPANY_NAME] Error getting company name: {e}")
-            company_name = ""
+        else:
+            log_error('handle_input_sum: db.pool отсутствует!')
+            group_row = None
+        if group_row and group_row['nickneim']:
+            nick = group_row['nickneim']
+            logger.info(f"[COMPANY_NAME] Original nick: {nick}")
+            if '_' in nick:
+                parts = nick.split('_', 1)
+                company_name = parts[1].strip() if len(parts) > 1 else nick.strip()
+            else:
+                company_name = nick.strip()
+                logger.info(f"[COMPANY_NAME] No dash, company_name: {company_name}")
         info_msg = (
             "<b>Уважаемые Клиенты !!!</b>\n\n"
             f"Компания <b>{company_name}</b> осуществляет продажи туров за <b>IDR</b> (индонезийская рупия).\n\n"
@@ -385,17 +450,20 @@ async def handle_input_sum(message: TgMessage):
             "2. Курс покупки и курс продажи валют всегда разный, поэтому если Вы вдруг оформляете возврат на российскую карту, то возврат будет осуществляться по курсу, установленным обменным сервисом на дату операции возврата.</blockquote>"
         )
         await message.answer(info_msg, parse_mode="HTML")
-        logger.info(f"[BOT_MSG] chat_id={message.chat.id}; to_user={message.from_user.id}; action=bot_send; text={info_msg[:200]}")
+        logger.info(f"[BOT_MSG] chat_id={chat_id}; to_user={user_id}; action=bot_send; text={info_msg[:200]}")
         # В админский чат отправляем обычное сообщение (без фото) (для прямого обмена)
         admin_msg = (
-            f"🙋‍♂️ Запрос от {username} из чата {chat_title}\n\n"
+            f"🙋‍♂️ Запрос от {username} из чата {chat_title_val}\n\n"
             f"Категория: {cat} Курс: {used_rate:.2f}\n"
             f"Сумма: {idr_amount:,} IDR = {rub_amount:,} RUB\n"
             f"Реквизиты: {acc_text} {spec_text}\n"
             f"🟡 ЗАЯВКА №{transaction_number} занесена в базу в {times[3]} (Bali)"
         )
         admin_msg = admin_msg.replace(",", " ")
-        await message.bot.send_message(config.ADMIN_GROUP, admin_msg)
+        if isinstance(bot, Bot) and hasattr(bot, 'send_message') and callable(bot.send_message):
+            await bot.send_message(config.ADMIN_GROUP, admin_msg)
+        else:
+            log_error('handle_input_sum: bot.send_message отсутствует или bot не Bot!')
         logger.info(f"[BOT_MSG] chat_id={config.ADMIN_GROUP}; to_user=ADMIN_GROUP; action=bot_send; text={admin_msg[:200]}")
     else:
         idr_amount = abs(value)  # Keep the absolute value for display
@@ -409,7 +477,7 @@ async def handle_input_sum(message: TgMessage):
         hour = now.strftime('%H')
         minute = now.strftime('%M')
         ms = f"{now.microsecond // 1000:03d}"
-        user_id_str = str(user.id)[-3:].zfill(3)
+        user_id_str = str(user_id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
         transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
@@ -425,7 +493,7 @@ async def handle_input_sum(message: TgMessage):
         log = ""
         # --- Запись в базу ---
         now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        user_nick = f"@{user.username}" if user.username else user.full_name
+        user_nick = f"@{user_username}" if user_username else user_full_name
         chat_id = message.chat.id
         msg_id = message.message_id
         if message.chat.username:
@@ -441,7 +509,7 @@ async def handle_input_sum(message: TgMessage):
         source_chat = str(chat_id)
         await db.add_transaction(
             transaction_number=transaction_number,
-            user_id=user.id,
+            user_id=user_id,
             created_at=created_at,
             idr_amount=-idr_amount,  # Store negative value in database
             rate_used=used_rate,
@@ -469,17 +537,28 @@ async def handle_input_sum(message: TgMessage):
         msg += "❗️ЭТО ВАЖНО*❗️(◕‿◕)\n\n"
         msg += "<blockquote>При оплате заказов с использованием иностранной валюты нам помогают партнеры из Программы Верифицированных Сервисов БалиФорума (https://t.me/balichatexchange/55612) - безопасность при обмене валют и оплате услуг на Бали и в Тайланде.</blockquote>"
         msg += f"❮❮❮ <b><code>{transaction_number}</code></b> {times[3]} (Bali) \n\n"
-        await safe_send_photo_with_caption(message, system_settings.media_mbt, msg.replace(",", " "), "HTML")
-        logger.info(f"[BOT_MSG] chat_id={message.chat.id}; to_user={message.from_user.id}; action=bot_send; text={msg[:200]}")
+        # safe_send_media_with_caption только с гарантированно не-None bot и chat_id
+        await safe_send_media_with_caption(
+            bot=bot,
+            chat_id=chat_id,
+            file_id=system_settings.media_mbt,
+            caption=msg.replace(",", " "),
+            parse_mode="HTML",
+            reply_to_message_id=message.message_id
+        )
+        logger.info(f"[BOT_MSG] chat_id={chat_id}; to_user={user_id}; action=bot_send; text={msg[:200]}")
         admin_msg = (
-            f"Запрос на возврат от {username} из чата {chat_title} (id: {chat.id}):\n"
+            f"Запрос на возврат от {username} из чата {chat_title_val} (id: {chat_id}):\n"
             f"Курс возврата: {used_rate:.2f}\n"
             f"Сумма: {idr_amount:,} IDR = {rub_amount:,} RUB\n"
             f"Реквизиты: {acc_info}\n"
             f"🟡 ЗАЯВКА №{transaction_number} занесена в базу в {times[3]} (Bali)"
         )
         admin_msg = admin_msg.replace(",", " ")
-        await message.bot.send_message(config.ADMIN_GROUP, admin_msg)
+        if isinstance(bot, Bot) and hasattr(bot, 'send_message') and callable(bot.send_message):
+            await bot.send_message(config.ADMIN_GROUP, admin_msg)
+        else:
+            log_error('handle_input_sum: bot.send_message отсутствует или bot не Bot!')
         logger.info(f"[BOT_MSG] chat_id={config.ADMIN_GROUP}; to_user=ADMIN_GROUP; action=bot_send; text={admin_msg[:200]}") 
 
     # --- Ночная смена: заявка пишется в базу со статусом night и реквизитами 'ночной запрос' ---
@@ -496,7 +575,7 @@ async def handle_input_sum(message: TgMessage):
         hour = now.strftime('%H')
         minute = now.strftime('%M')
         ms = f"{now.microsecond // 1000:03d}"
-        user_id_str = str(user.id)[-3:].zfill(3)
+        user_id_str = str(user_id)[-3:].zfill(3)
         msg_id_last2 = str(message.message_id)[-2:].zfill(2)
         transaction_number = f"{day}{month}.{user_id_str}.{hour}{minute}.{ms}.{msg_id_last2}"
         created_at = naive_now
@@ -506,7 +585,7 @@ async def handle_input_sum(message: TgMessage):
         acc_info = "ночной запрос"
         log = ""
         now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        user_nick = f"@{user.username}" if user.username else user.full_name
+        user_nick = f"@{user_username}" if user_username else user_full_name
         chat_id = message.chat.id
         msg_id = message.message_id
         if message.chat.username:
@@ -522,7 +601,7 @@ async def handle_input_sum(message: TgMessage):
         source_chat = str(chat_id)
         await db.add_transaction(
             transaction_number=transaction_number,
-            user_id=user.id,
+            user_id=user_id,
             created_at=created_at,
             idr_amount=idr_amount,
             rate_used=used_rate,
