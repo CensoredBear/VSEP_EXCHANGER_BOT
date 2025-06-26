@@ -5,12 +5,14 @@ import asyncio
 from aiogram import Bot
 from aiogram.types import Message as TgMessage, ReplyKeyboardMarkup, InlineKeyboardMarkup
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramMigrateToChat
 from datetime import datetime, timezone
 import pytz
-from config import system_settings
+from config import system_settings, config
 from db import db
 from logger import logger, log_system, log_user, log_func, log_db, log_warning, log_error
 
+'''🟢 универсальная функция для получения времени и даты в разных форматах'''
 def get_bali_and_msk_time_list():
     """Вернуть список из 8 вариантов времени: 
     UTC (дата+время), UTC (только время), Бали (дата+время), Бали (только время), МСК (дата+время), МСК (только время), Бали (дата+время), МСК (дата+время)
@@ -37,6 +39,7 @@ def get_bali_and_msk_time_list():
         now_msk_long,      # 7: МСК дата+время часы:минуты
     ]
 
+'''🟢 универсальная функция для отправки сообщений'''
 async def send_message(
     bot: Bot,
     chat_id: int | None = None,
@@ -45,13 +48,13 @@ async def send_message(
     reply_to_message_id: int | None = None,
     message_thread_id: int | None = None,
     parse_mode: ParseMode = ParseMode.HTML,
-    reply_markup: ReplyKeyboardMarkup | InlineKeyboardMarkup = None,
+    reply_markup: ReplyKeyboardMarkup | InlineKeyboardMarkup | None = None,
     delete_after: int | None = None,
     delay: int | None = None,
     forward_from_chat_id: int | None = None,
     forward_message_id: int | None = None,
     **kwargs
-) -> TgMessage | None:
+    ) -> TgMessage | None:
     """
     Универсальная отправка сообщения:
       - обычное сообщение
@@ -103,9 +106,9 @@ async def edit_message(
     text: str,
     *,
     parse_mode: ParseMode = ParseMode.HTML,
-    reply_markup: ReplyKeyboardMarkup | InlineKeyboardMarkup = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
     **kwargs
-):
+ ):
     return await bot.edit_message_text(
         text,
         chat_id=chat_id,
@@ -170,7 +173,7 @@ def get_control_no_attachment_message() -> str:
     return (f'''
     🚫 НЕ ВЫПОЛНЕНО!
 
-    ⚠️ПРИЧИНА: <b>Некорректное использование команды</b>
+⚠️ПРИЧИНА: <b>Некорректное использование команды</b>
 
 Команда /control должна быть отправлена:
 • Либо вместе с вложением
@@ -182,7 +185,7 @@ def get_control_no_attachment_message() -> str:
 /control часть заказа</blockquote>
             
 Пожалуйста, прикрепите вложение или ответьте на сообщение с вложением.'''
-)
+     )
 
 def get_shift_time_message():
     """Получение сообщения о времени смены"""
@@ -204,3 +207,40 @@ def get_night_shift_message():
         f"ответы на заявки — информационные: бот не выдаёт реквизиты, заявки не попадают в базу "
         f"и не могут быть оплачены."
     ) 
+
+"""🟡 Сообщение о запуске бота"""
+async def send_startup_message(bot: Bot):
+    try:
+        message = f'''(´•ᴗ•`) VSEP Бот запущен и готов к работе'''
+        await send_to_admin_group_safe(bot, message, parse_mode="HTML")
+        logger.info("Отправлено сообщение о запуске бота в админскую группу")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке сообщения о запуске: {e}")
+
+async def send_to_admin_group_safe(bot, text, parse_mode="HTML"):
+    """Безопасная отправка сообщения в админскую группу с обработкой миграции"""
+    try:
+        await bot.send_message(config.ADMIN_GROUP, text, parse_mode=parse_mode)
+        return True
+    except TelegramMigrateToChat as e:
+        # Группа была обновлена до супергруппы, используем новый ID
+        new_chat_id = e.migrate_to_chat_id
+        logger.warning(f"Группа {config.ADMIN_GROUP} была обновлена до супергруппы {new_chat_id}")
+        try:
+            await bot.send_message(new_chat_id, text, parse_mode=parse_mode)
+            # Обновляем конфигурацию
+            config.ADMIN_GROUP = str(new_chat_id)
+            logger.info(f"Обновлен ADMIN_GROUP на {new_chat_id}")
+            return True
+        except Exception as e2:
+            logger.error(f"Не удалось отправить сообщение в новую группу {new_chat_id}: {e2}")
+            return False
+    except Exception as e:
+        logger.error(f"Не удалось отправить сообщение в админскую группу: {e}")
+        return False
+
+
+
+
+
+

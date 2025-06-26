@@ -21,6 +21,8 @@ from db import db
 from logger import logger, log_system, log_user, log_func, log_db, log_warning, log_error
 from db import db
 from procedures.bank_handlers import bank_router
+from procedures.shift_handlers import force_open_callback, force_close_callback
+from procedures.rate_handlers import rate_change_confirm, rate_change_cancel
 from permissions import is_admin_or_superadmin, is_operator_or_admin
 from help_menu import build_pretty_help_text, get_bot_commands_for_status
 from messages import (
@@ -31,18 +33,22 @@ from messages import (
     get_control_error_message,
     send_message,
     get_control_confirm_message,
-    get_control_no_attachment_message
+    get_control_no_attachment_message,
+    send_to_admin_group_safe
 )
 from chat_logger import log_message
 from procedures.input_sum import handle_input_sum
 from scheduler import init_scheduler, scheduler, night_shift
 from config import config, system_settings
 from google_sync import write_to_google_sheet_async, write_multiple_to_google_sheet
+from utils import fmt_0, fmt_2, fmt_delta
+from commands.accept import router as accept_router
 import time
 import asyncio
 from aiogram.exceptions import TelegramBadRequest, TelegramMigrateToChat
 import json
 from collections import defaultdict
+from joke_parser import get_joke, get_joke_with_source
 
 # Создаем роутер для всех обработчиков
 router = Router()
@@ -61,50 +67,6 @@ BALI_TZ = timezone(timedelta(hours=8))
 
 # Глобальный dict: для каждого чата только один актуальный control message_id
 active_control_message = defaultdict(lambda: None)
-
-async def send_to_admin_group_safe(bot, text, parse_mode="HTML"):
-    """Безопасная отправка сообщения в админскую группу с обработкой миграции"""
-    try:
-        await bot.send_message(config.ADMIN_GROUP, text, parse_mode=parse_mode)
-        return True
-    except TelegramMigrateToChat as e:
-        # Группа была обновлена до супергруппы, используем новый ID
-        new_chat_id = e.migrate_to_chat_id
-        logger.warning(f"Группа {config.ADMIN_GROUP} была обновлена до супергруппы {new_chat_id}")
-        try:
-            await bot.send_message(new_chat_id, text, parse_mode=parse_mode)
-            # Обновляем конфигурацию
-            config.ADMIN_GROUP = str(new_chat_id)
-            logger.info(f"Обновлен ADMIN_GROUP на {new_chat_id}")
-            return True
-        except Exception as e2:
-            logger.error(f"Не удалось отправить сообщение в новую группу {new_chat_id}: {e2}")
-            return False
-    except Exception as e:
-        logger.error(f"Не удалось отправить сообщение в админскую группу: {e}")
-        return False
-
-def fmt_0(val):
-    """Format number with 0 decimal places"""
-    if val is None:
-        return "—"
-    return f"{val:,.0f}".replace(",", " ").replace(".", ",")
-
-def fmt_2(val):
-    """Format number with 2 decimal places"""
-    if val is None:
-        return "—"
-    return f"{val:,.2f}".replace(",", " ").replace(".", ",")
-
-def fmt_delta(coef):
-    """Format coefficient as percentage delta"""
-    if coef is None:
-        return "—"
-    delta = (coef - 1) * 100
-    if abs(delta) < 0.01:
-        return "(базовый)"
-    sign = "+" if delta > 0 else ""
-    return f"({sign}{delta:.2f}%)".replace(".", ",")
 
 """🟡 Установка команд бота в меню"""
 async def set_commands(bot: Bot):
@@ -791,191 +753,6 @@ async def cmd_sos(message: Message):
     await message.reply("SOS отправлен!")
 
 # Обработчики команд для оператора сервиса
-"""🟡 Команда accept"""
-@router.message(Command("accept"))
-async def cmd_accept(message: Message):
-    reply = message.reply_to_message
-    args = message.text.split()
-    base_error = "<blockquote>Команда должна быть отправлена в ответ на сообщение с командой [control].</blockquote>"
-    
-    # 1. Не в ответ на сообщение — ошибка
-    if not reply:
-        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: команда отправлена НЕ в ответ на сообщение с командой [control].")
-        return
-
-    # 2. Проверяем, что сообщение содержит команду /control
-    reply_text = (getattr(reply, 'text', None) or getattr(reply, 'caption', None) or "")
-    if "/control" not in reply_text:
-        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: команда должна быть отправлена в ответ на сообщение с командой [control].")
-        return
-
-    # # 3. Нет фото/документа — ошибка
-    # if not (
-    #     (getattr(message, "photo", None) or getattr(message, "document", None)) or
-    #     (reply and (getattr(reply, "photo", None) or getattr(reply, "document", None)))
-    # ):
-    #     await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: команда должна быть отправлена с фото или документом (или в ответ на сообщение с фото/документом).")
-    #     return
-
-    # 4. Нет номера заявки — ошибка
-    if len(args) < 2:
-        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: это архивная команда. В текщей реальности 'accept' осуществляется кнопкой под запросом.")
-        return
-
-    transaction_number = args[1].strip()
-    transaction = await db.get_transaction_by_number(transaction_number)
-    if not transaction:
-        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: заявка с таким номером не найдена.")
-        return
-
-    if transaction.get('status') not in ("created", "timeout"):
-        await message.reply(f"{base_error}\n🚫 Не выполнено.\nПРИЧИНА: это архивная команда. В текщей реальности 'accept' осуществляется кнопкой под запросом.")
-        return
-
-    user_rank = await db.get_user_rank(message.from_user.id)
-    if user_rank not in ("operator", "admin"):
-        await message.reply("🚫 Не выполнено.\nПРИЧИНА: команда доступна только оператору сервиса и администратору.")
-        return
-
-    user = message.from_user
-    times = get_bali_and_msk_time_list()
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    # Извлекаем note из команды /control
-    note_from_control = None
-    idx = reply_text.find("/control")
-    note_from_control = reply_text[idx + len("/control"):].strip()
-    # Обновляем note заявки
-    await db.update_transaction_note(transaction_number, note_from_control)
-
-    await db.update_transaction_status(transaction_number, "accept", now_utc)
-    confirm_time = times[6]  # дата+время по Бали
-    user_username = f"@{user.username}" if user.username else user.full_name
-    rub = transaction.get('rub_amount', '-')
-    idr = transaction.get('idr_amount', '-')
-    acc_info = transaction.get('account_info', '-')
-    # Форматируем числа с разрядностью через пробел
-    try:
-        rub_fmt = fmt_0(int(rub))
-    except Exception:
-        rub_fmt = str(rub)
-    try:
-        idr_fmt = fmt_0(int(idr))
-    except Exception:
-        idr_fmt = str(idr)
-    caption = (f'''
-✅ Платёж  ❯❯❯❯ {rub_fmt} RUB ({idr_fmt} IDR)
-
-<i>отправленный на реквизиты:</i> 
-<blockquote><i>{acc_info}</i></blockquote>
-    
-✅ ТРАНЗАКЦИЯ ПОДТВЕРЖДЕНА
-Представителем Сервиса <b>{user_username}</b>
-🕒 в: {confirm_time} (Bali)
-
-🔵 Заявка: <b><code>{transaction_number}</code></b>''')
-    # # --- Формируем ответ с вложением, если оно есть ---
-    # control_media = None
-    # control_caption = None
-    # # 1. Вложение в самом сообщении с /control
-    # if getattr(reply, 'photo', None):
-    #     control_media = reply.photo[-1].file_id  # самое большое фото
-    #     control_caption = caption
-    #     await message.reply_photo(control_media, caption=control_caption)
-    # elif getattr(reply, 'document', None):
-    #     control_media = reply.document.file_id
-    #     control_caption = caption
-    #     await message.reply_document(control_media, caption=control_caption)
-    # # 2. Вложение в сообщении, на которое ссылается /control
-    # elif getattr(reply, 'reply_to_message', None):
-    #     orig = reply.reply_to_message
-    #     if getattr(orig, 'photo', None):
-    #         control_media = orig.photo[-1].file_id
-    #         control_caption = caption
-    #         await message.reply_photo(control_media, caption=control_caption)
-    #     elif getattr(orig, 'document', None):
-    #         control_media = orig.document.file_id
-    #         control_caption = caption
-    #         await message.reply_document(control_media, caption=control_caption)
-    #     else:
-    #         await message.reply(caption)
-    # else:
-    
-    # Отправляем новое сообщение и сохраняем его ID
-    notification_msg = await message.reply(caption, parse_mode="HTML")
-    notification_msg_id = notification_msg.message_id
-    
-    # Добавляем запись в history
-    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    user_nick = f"@{user.username}" if user.username else user.full_name
-    chat_id = message.chat.id
-    msg_id = message.message_id
-    # Ссылка на текущее сообщение (accept)
-    if message.chat.username:
-        link_accept = f"https://t.me/{message.chat.username}/{msg_id}"
-    else:
-        chat_id_num = str(chat_id)
-        if chat_id_num.startswith('-100'):
-            chat_id_num = chat_id_num[4:]
-        elif chat_id_num.startswith('-'):
-            chat_id_num = chat_id_num[1:]
-        link_accept = f"https://t.me/c/{chat_id_num}/{msg_id}"
-    
-    # Ссылка на новое сообщение с подтверждением
-    if message.chat.username:
-        link_notification = f"https://t.me/{message.chat.username}/{notification_msg_id}"
-    else:
-        chat_id_num = str(chat_id)
-        if chat_id_num.startswith('-100'):
-            chat_id_num = chat_id_num[4:]
-        elif chat_id_num.startswith('-'):
-            chat_id_num = chat_id_num[1:]
-        link_notification = f"https://t.me/c/{chat_id_num}/{notification_msg_id}"
-    
-    # Данные о сообщении-контроле (reply)
-    reply_user = reply.from_user
-    reply_nick = f"@{reply_user.username}" if reply_user and reply_user.username else (reply_user.full_name if reply_user else "unknown")
-    reply_date = reply.date.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if hasattr(reply, 'date') and reply.date else "unknown"
-    reply_msg_id = reply.message_id if hasattr(reply, 'message_id') else None
-    if message.chat.username and reply_msg_id:
-        link_control = f"https://t.me/{message.chat.username}/{reply_msg_id}"
-    elif reply_msg_id:
-        chat_id_num = str(chat_id)
-        if chat_id_num.startswith('-100'):
-            chat_id_num = chat_id_num[4:]
-        elif chat_id_num.startswith('-'):
-            chat_id_num = chat_id_num[1:]
-        link_control = f"https://t.me/c/{chat_id_num}/{reply_msg_id}"
-    else:
-        link_control = "-"
-    # Формируем две записи
-    control_entry = f"{reply_date}${reply_nick}$контроль${link_control}"
-    accept_entry = f"{now_str}${user_nick}$accept${link_accept}"
-    notification_entry = f"{now_str}${user_nick}$notification${link_notification}"
-    # Получаем старую history
-    old_history = transaction.get('history', '')
-    if old_history:
-        history = old_history + "%%%" + control_entry + "%%%" + accept_entry + "%%%" + notification_entry
-    else:
-        history = control_entry + "%%%" + accept_entry + "%%%" + notification_entry
-    await db.update_transaction_history(transaction_number, history)
-    # --- Счетчик контроля ---
-    key = f"{chat_id}_control_counter"
-    counter = await db.get_control_counter(chat_id)
-    if counter > 0:
-        await db.set_control_counter(chat_id, counter - 1)
-        log_func(f"Счетчик контроля для чата {chat_id} (ключ: {key}) уменьшен: {counter} -> {counter-1}")
-        log_db(f"[DB] set_system_setting: {key} = {counter-1}")
-    else:
-        await message.reply(f'''
-        ВНИМАНИЕ!!!
-                            
-<b>🟡 ACCEPT without CONTROL</b>
-
-<u>Команда принята, подтврждение заявки выполнено.</u>
-
-<blockquote><i>Флаг лишь отмечает, что количество CONTROL меньше количества ACCEPT. Это не является критической ошибкой – однако, рекомендуется проверить корректность всех проведенных ордеров. Если найдете ошибку – обращайтесь к суперадмину для ручной корректировки.</i></blockquote>''')
-        log_func(f"Попытка уменьшить счетчик контроля при нуле для чата {chat_id} (ключ: {key})")
 
 # Обработчики команд для админа сервиса
 """🟡 Команда bank_show"""
@@ -1830,16 +1607,6 @@ async def cmd_rate_coef_change(message: Message):
     """🟡 Команда rate_coef_change (в разработке)"""
     await cmd_in_development(message, "/rate_coef_change", "Изменение коэффициентов курсов")
 
-"""🟡 Запуск бота"""
-async def send_startup_message(bot: Bot):
-    """🟡 Запуск бота"""
-    try:
-        message = "🤖 VSEP Бот запущен и готов к работе!"
-        await send_to_admin_group_safe(bot, message, parse_mode="HTML")
-        logger.info("Отправлено сообщение о запуске бота в админскую группу")
-    except Exception as e:
-        logger.error(f"Ошибка при отправке сообщения о запуске: {e}")
-
 @router.message(Command("worktime"))
 async def cmd_worktime(message: Message, state: FSMContext):
     """Обработчик команды /worktime для изменения рабочего времени"""
@@ -2501,6 +2268,11 @@ def register_handlers(dp: Dispatcher):
     dp.include_router(bank_router)
     print("[DEBUG] register_handlers: банковский роутер подключен")
     
+    # Подключаем роутер для команды accept
+    print("[DEBUG] register_handlers: подключаю accept роутер")
+    dp.include_router(accept_router)
+    print("[DEBUG] register_handlers: accept роутер подключен")
+    
     # Регистрируем остальные callback обработчики напрямую в диспетчер
     dp.callback_query.register(force_open_callback, lambda c: c.data in ["force_open_yes", "force_open_no"])
     dp.callback_query.register(force_close_callback, lambda c: c.data in ["force_close_yes", "force_close_no"])
@@ -2867,3 +2639,52 @@ async def zombie_callback_handler(call: CallbackQuery, state: FSMContext):
             log_error(f"Ошибка при оживлении заявки {transaction_number}: {e}")
             await call.answer("❌ Произошла ошибка при оживлении!", show_alert=True)
             return
+
+# === КОМАНДА АНЕКДОТОВ ===
+@router.message(Command("joke"))
+async def cmd_joke(message: Message):
+    """Команда для получения случайного анекдота"""
+    try:
+        log_func(f"Запрос анекдота от пользователя {message.from_user.id}")
+        
+        # Отправляем сообщение о загрузке
+        loading_msg = await message.reply("🎭 Ищу для вас анекдот...")
+        
+        # Получаем анекдот с информацией об источнике
+        joke_data = await get_joke_with_source()
+        
+        # Формируем красивое сообщение
+        joke_text = joke_data["joke"]
+        source = joke_data["source"]
+        
+        # Добавляем эмодзи в зависимости от типа анекдота
+        if "программист" in joke_text.lower():
+            emoji = "💻"
+        elif "git" in joke_text.lower() or "python" in joke_text.lower():
+            emoji = "🐍"
+        else:
+            emoji = "😄"
+        
+        response_text = (
+            f"{emoji} <b>Анекдот:</b>\n\n"
+            f"<i>{joke_text}</i>\n\n"
+            f"📡 <i>Источник: {source}</i>"
+        )
+        
+        # Обновляем сообщение с анекдотом
+        await loading_msg.edit_text(response_text, parse_mode="HTML")
+        
+        log_func(f"Анекдот успешно отправлен пользователю {message.from_user.id}")
+        
+    except Exception as e:
+        log_error(f"Ошибка при получении анекдота: {e}")
+        error_text = (
+            "😅 <b>Упс!</b>\n\n"
+            "К сожалению, не удалось найти анекдот.\n"
+            "Попробуйте позже или напишите свой! 😄"
+        )
+        
+        if 'loading_msg' in locals():
+            await loading_msg.edit_text(error_text, parse_mode="HTML")
+        else:
+            await message.reply(error_text, parse_mode="HTML")

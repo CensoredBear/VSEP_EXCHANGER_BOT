@@ -13,7 +13,8 @@ import traceback
 from config import config, system_settings
 from logger import logger, log_system, log_info, setup_logger
 from scheduler import Scheduler, init_scheduler
-from handlers import register_handlers, set_commands, send_startup_message, cmd_help, cmd_start, cmd_check
+from handlers import register_handlers, set_commands, cmd_help, cmd_start, cmd_check
+from messages import send_startup_message
 from db import db
 from middlewares import UserSaveMiddleware, ChatLoggerMiddleware
 from callback_guard import CallbackInitiatorGuard
@@ -41,7 +42,7 @@ async def main():
             logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Не удалось загрузить системные настройки даже после их создания. Остановка бота.")
             raise RuntimeError("Не удалось загрузить системные настройки.")
 
-    bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    bot = Bot(token=str(config.BOT_TOKEN), default=DefaultBotProperties(parse_mode="HTML"))
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
     
