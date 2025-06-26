@@ -294,3 +294,66 @@ def write_to_google_sheet_sync(
         logger.error(f"[GSheets] Ошибка при записи в Google Sheets: {e}")
         print(f"[GSheets] Ошибка при записи в Google Sheets: {e}")
         raise 
+
+def read_sum_all_report(month_label: str) -> list:
+    """
+    Читает данные с листа SUM_ALL по заданному месяцу (например, 'июн..2025').
+    Возвращает список словарей по всем найденным проектам.
+    """
+    creds_json = os.getenv("GOOGLE_TABLE_CREDS")
+    if not creds_json:
+        print("[DEBUG] GOOGLE_TABLE_CREDS не задана в env!")
+        raise ValueError("GOOGLE_TABLE_CREDS не задана в env!")
+    creds_dict = json.loads(creds_json)
+    creds = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/drive.file"
+        ]
+    )
+    gc = gspread.authorize(creds)
+    spreadsheet_name = "VSEP_EXCHANGER_PARTNERS"
+    print(f"[DEBUG] Открываю таблицу: {spreadsheet_name}")
+    sh = gc.open(spreadsheet_name)
+    ws = sh.worksheet("SUM_ALL")
+    print(f"[DEBUG] Открыл лист: SUM_ALL")
+    data = ws.get_all_values()
+    print(f"[DEBUG] Строка 2 (месяцы): {data[1]}")
+    # Поиск всех столбцов с нужным месяцем
+    month_cols = [i for i, v in enumerate(data[1]) if v.strip() == month_label.strip()]
+    print(f"[DEBUG] Найденные индексы столбцов для '{month_label}': {month_cols}")
+    result = []
+    for col in month_cols:
+        try:
+            project = data[2][col].strip()
+            count = data[3][col].strip()
+            commission_percent = data[36][col].strip()
+            turnover = data[41][col].strip()
+            commission = data[42][col].strip()
+            print(f"[DEBUG] col={col} | project={project} | count={count} | %={commission_percent} | turnover={turnover} | commission={commission}")
+            # Определяем валюту оборота и комиссии (по строке оборота)
+            currency = ''
+            commission_currency = ''
+            import re
+            m = re.search(r'([\d\s,.]+)\s*([A-Z]+)', turnover)
+            if m:
+                currency = m.group(2)
+            m2 = re.search(r'([\d\s,.]+)\s*([A-Z]+)', commission)
+            if m2:
+                commission_currency = m2.group(2)
+            result.append({
+                'project': project,
+                'count': count,
+                'commission_percent': commission_percent,
+                'turnover': turnover,
+                'commission': commission,
+                'currency': currency,
+                'commission_currency': commission_currency
+            })
+        except Exception as e:
+            print(f"[DEBUG] Ошибка парсинга столбца {col}: {e}")
+            continue
+    print(f"[DEBUG] Итоговый результат: {result}")
+    return result 

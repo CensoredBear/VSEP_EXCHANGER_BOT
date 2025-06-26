@@ -40,7 +40,7 @@ from chat_logger import log_message
 from procedures.input_sum import handle_input_sum
 from scheduler import init_scheduler, scheduler, night_shift
 from config import config, system_settings
-from google_sync import write_to_google_sheet_async, write_multiple_to_google_sheet
+from google_sync import write_to_google_sheet_async, write_multiple_to_google_sheet, read_sum_all_report
 from utils import fmt_0, fmt_2, fmt_delta
 from commands.accept import router as accept_router
 from commands.joke import router as joke_router
@@ -54,6 +54,7 @@ import json
 from collections import defaultdict
 from joke_parser import get_joke, get_joke_with_source
 from commands.joke import router as joke_router
+from aiogram_calendar import SimpleCalendar, get_user_locale
 
 # Создаем роутер для всех обработчиков
 router = Router()
@@ -68,10 +69,105 @@ class ShiftTimeStates(StatesGroup):
 class ControlStates(StatesGroup):
     waiting_for_order_selection = State()
 
+class VsepReportStates(StatesGroup):
+    waiting_for_month = State()
+    waiting_for_rate = State()
+
 BALI_TZ = timezone(timedelta(hours=8))
 
 # Глобальный dict: для каждого чата только один актуальный control message_id
 active_control_message = defaultdict(lambda: None)
+
+# Кастомный календарь для выбора месяца/года
+class MonthYearCalendar:
+    """Календарь для выбора только месяца и года"""
+    
+    def __init__(self, locale='ru_RU'):
+        self.locale = locale
+        self.months = {
+            'ru_RU': [
+                'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+                'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+            ],
+            'en_US': [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ]
+        }
+        self.months_short = {
+            'ru_RU': [
+                'янв.', 'фев.', 'мар.', 'апр.', 'май', 'июн.',
+                'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'
+            ],
+            'en_US': [
+                'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+            ]
+        }
+    
+    def create_month_year_keyboard(self, year: int, month: int = None) -> InlineKeyboardMarkup:
+        """Создает клавиатуру для выбора месяца/года"""
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        
+        builder = InlineKeyboardBuilder()
+        
+        # Если месяц не выбран, показываем месяцы
+        if month is None:
+            # Заголовок с годом
+            builder.row(InlineKeyboardButton(
+                text=f"📅 {year}",
+                callback_data=f"my_year_{year}"
+            ))
+            
+            # Кнопки навигации по годам
+            nav_row = []
+            nav_row.append(InlineKeyboardButton(
+                text="◀️",
+                callback_data=f"my_year_{year-1}"
+            ))
+            nav_row.append(InlineKeyboardButton(
+                text="▶️",
+                callback_data=f"my_year_{year+1}"
+            ))
+            builder.row(*nav_row)
+            
+            # Месяцы (3 в ряд)
+            months = self.months.get(self.locale, self.months['en_US'])
+            for i in range(0, 12, 3):
+                row = []
+                for j in range(3):
+                    if i + j < 12:
+                        month_num = i + j + 1
+                        row.append(InlineKeyboardButton(
+                            text=months[i + j],
+                            callback_data=f"my_month_{year}_{month_num}"
+                        ))
+                builder.row(*row)
+            
+            # Кнопка отмены
+            builder.row(InlineKeyboardButton(
+                text="❌ Отмена",
+                callback_data="my_cancel"
+            ))
+        
+        return builder.as_markup()
+    
+    def process_selection(self, callback_data: str) -> tuple[bool, dict]:
+        """Обрабатывает выбор в календаре"""
+        if callback_data == "my_cancel":
+            return True, {"action": "cancel"}
+        
+        if callback_data.startswith("my_year_"):
+            year = int(callback_data.split("_")[2])
+            return False, {"year": year, "month": None}
+        
+        if callback_data.startswith("my_month_"):
+            parts = callback_data.split("_")
+            year = int(parts[2])
+            month = int(parts[3])
+            return True, {"year": year, "month": month}
+        
+        return False, {}
 
 """🟡 Установка команд бота в меню"""
 async def set_commands(bot: Bot):
@@ -2259,6 +2355,148 @@ async def cmd_report(message: Message):
     # Отправляем отчет
     await message.reply(final_report, parse_mode="HTML", reply_markup=reply_markup)
 
+@router.message(Command("report_vsep"))
+async def cmd_report_vsep(message: Message, state: FSMContext):
+    # Проверка: только для админа/суперадмина и только в чате админов
+    if str(message.chat.id) != str(config.ADMIN_GROUP):
+        await message.reply("⛔️ Команда доступна только в чате админов.")
+        return
+    if not await is_admin_or_superadmin(message.from_user.id):
+        await message.reply("⛔️ Команда доступна только для админа и суперадмина.")
+        return
+    
+    # Создаем календарь для выбора месяца/года
+    calendar = MonthYearCalendar()
+    current_year = datetime.now().year
+    keyboard = calendar.create_month_year_keyboard(current_year)
+    
+    await state.set_state(VsepReportStates.waiting_for_month)
+    await message.reply(
+        "📅 Выберите месяц и год для отчёта:",
+        reply_markup=keyboard
+    )
+
+@router.message(VsepReportStates.waiting_for_month)
+async def report_vsep_month_input(message: Message, state: FSMContext):
+    if str(message.chat.id) != str(config.ADMIN_GROUP):
+        await message.reply("⛔️ Команда доступна только в чате админов.")
+        await state.clear()
+        return
+    if not await is_admin_or_superadmin(message.from_user.id):
+        await message.reply("⛔️ Команда доступна только для админа и суперадмина.")
+        await state.clear()
+        return
+    month = message.text.strip()
+    await state.update_data(selected_month=month)
+    await state.set_state(VsepReportStates.waiting_for_rate)
+    await message.reply(
+        "💱 Введите курс IDR к USDT для пересчёта итогов (например: 16000)",
+        parse_mode="HTML"
+    )
+
+@router.message(VsepReportStates.waiting_for_rate)
+async def report_vsep_rate_input(message: Message, state: FSMContext):
+    if str(message.chat.id) != str(config.ADMIN_GROUP):
+        await message.reply("⛔️ Команда доступна только в чате админов.")
+        await state.clear()
+        return
+    if not await is_admin_or_superadmin(message.from_user.id):
+        await message.reply("⛔️ Команда доступна только для админа и суперадмина.")
+        await state.clear()
+        return
+    rate_text = message.text.strip().replace(",", ".")
+    try:
+        rate = float(rate_text)
+        if rate <= 0:
+            raise ValueError
+    except Exception:
+        await message.reply("❗️ Введите корректный курс (например: 16000)")
+        return
+    data = await state.get_data()
+    month = data.get("selected_month")
+    await message.reply(f"⏳ Формирую отчёт за <b>{month}</b> по курсу <b>{rate}</b>...", parse_mode="HTML")
+    try:
+        report_data = await asyncio.get_event_loop().run_in_executor(None, read_sum_all_report, month)
+        print(f"[DEBUG] report_data: {report_data}")
+        if not report_data:
+            await message.reply(f"❌ Нет данных за {month} на листе SUM_ALL.")
+            await state.clear()
+            return
+        # Формируем отчёт по проектам
+        lines = []
+        total_turnover = {}
+        total_commission = {}
+        import re
+        def parse_num(val, currency):
+            if not val:
+                return 0.0
+            # Сначала заменяем запятые на точки (для десятичных чисел)
+            val = re.sub(r",", ".", str(val))
+            # Затем удаляем все пробелы (включая неразрывные)
+            val = re.sub(r"\s", "", val)
+            if currency:
+                val = val.replace(currency, "")
+            try:
+                return float(val)
+            except Exception:
+                # Пробуем найти любое число в строке
+                m = re.search(r"([\d.]+)", val)
+                return float(m.group(1)) if m else 0.0
+        for row in report_data:
+            name = row['project']
+            count = row['count']
+            turnover = row['turnover']
+            commission = row['commission']
+            percent = row['commission_percent']
+            currency = row['currency']
+            comm_currency = row['commission_currency']
+            # Если валюта не найдена, определяем по названию проекта
+            if not currency:
+                if 'SAL' in name.upper():
+                    currency = 'USDT'
+                else:
+                    currency = 'IDR'
+            if not comm_currency:
+                comm_currency = currency
+            tval = parse_num(turnover, currency)
+            cval = parse_num(commission, comm_currency)
+            print(f"[DEBUG] {name}: оборот={tval} {currency}, комиссия={cval} {comm_currency}")
+            total_turnover[currency] = total_turnover.get(currency, 0) + tval
+            total_commission[comm_currency] = total_commission.get(comm_currency, 0) + cval
+            # Формат блока по проекту
+            lines.append(f"<b>{name}</b>\nКол-во сделок: <b>{count}</b>\nОборот: <b>{turnover}</b>\nКомиссия: <b>{commission}</b> (<code>{percent}</code>)\n")
+        print(f"[DEBUG] total_turnover: {total_turnover}")
+        print(f"[DEBUG] total_commission: {total_commission}")
+        # Итоги по валютам
+        lines.append("<b>Всего оборот:</b>")
+        for cur, val in total_turnover.items():
+            # Форматируем в европейском стиле: пробелы как разделители тысяч, запятые как десятичные
+            formatted = f"{val:,.2f}".replace(",", " ").replace(".", ",")
+            lines.append(f"<b>{formatted} {cur}</b>")
+        lines.append("\n<b>Всего комиссия:</b>")
+        for cur, val in total_commission.items():
+            # Форматируем в европейском стиле: пробелы как разделители тысяч, запятые как десятичные
+            formatted = f"{val:,.2f}".replace(",", " ").replace(".", ",")
+            lines.append(f"<b>{formatted} {cur}</b>")
+        # Пересчёт в USDT
+        idr_total = total_turnover.get('IDR', 0)
+        idr_comm = total_commission.get('IDR', 0)
+        usdt_total = total_turnover.get('USDT', 0)
+        usdt_comm = total_commission.get('USDT', 0)
+        usdt_total_sum = usdt_total + (idr_total / rate if rate else 0)
+        usdt_comm_sum = usdt_comm + (idr_comm / rate if rate else 0)
+        lines.append(f"\n<b>Пересчёт по курсу {rate:,.2f}:</b>")
+        # Форматируем в европейском стиле
+        usdt_total_formatted = f"{usdt_total_sum:,.2f}".replace(",", " ").replace(".", ",")
+        usdt_comm_formatted = f"{usdt_comm_sum:,.2f}".replace(",", " ").replace(".", ",")
+        lines.append(f"Всего оборот в USDT: <b>{usdt_total_formatted}</b>")
+        lines.append(f"Всего комиссия в USDT: <b>{usdt_comm_formatted}</b>")
+        report_text = '\n'.join(lines)
+        await message.reply(report_text, parse_mode="HTML")
+    except Exception as e:
+        await message.reply(f"❌ Ошибка при формировании отчёта: {e}")
+    await state.clear()
+
 def register_handlers(dp: Dispatcher):
     """Регистрация всех обработчиков"""
     print("[DEBUG] register_handlers: начало регистрации")
@@ -2722,3 +2960,48 @@ async def cmd_joke(message: Message):
             await loading_msg.edit_text(error_text, parse_mode="HTML")
         else:
             await message.reply(error_text, parse_mode="HTML")
+
+# Обработчик callback'ов для календаря выбора месяца/года
+@router.callback_query(lambda c: c.data.startswith("my_"))
+async def month_year_calendar_callback(call: CallbackQuery, state: FSMContext):
+    """Обработчик callback'ов календаря выбора месяца/года"""
+    if str(call.message.chat.id) != str(config.ADMIN_GROUP):
+        await call.answer("⛔️ Команда доступна только в чате админов.", show_alert=True)
+        await state.clear()
+        return
+    if not await is_admin_or_superadmin(call.from_user.id):
+        await call.answer("⛔️ Команда доступна только для админа и суперадмина.", show_alert=True)
+        await state.clear()
+        return
+    
+    calendar = MonthYearCalendar()
+    selected, data = calendar.process_selection(call.data)
+    
+    if data.get("action") == "cancel":
+        await call.message.edit_text("❌ Выбор месяца отменён.")
+        await state.clear()
+        return
+    
+    if selected and data.get("month"):
+        # Месяц выбран, сохраняем данные
+        year = data["year"]
+        month = data["month"]
+        
+        # Формируем строку месяца в формате для Google Sheets (например: "июн.2025")
+        months_short = calendar.months_short['ru_RU']
+        month_name = months_short[month - 1]
+        month_str = f"{month_name}{year}"
+        
+        await state.update_data(selected_month=month_str)
+        await state.set_state(VsepReportStates.waiting_for_rate)
+        
+        await call.message.edit_text(
+            f"📅 Выбран: <b>{calendar.months['ru_RU'][month-1]} {year}</b>\n\n"
+            f"💱 Введите курс IDR к USDT для пересчёта итогов (например: 16000)",
+            parse_mode="HTML"
+        )
+    else:
+        # Обновляем календарь с новым годом
+        year = data.get("year", datetime.now().year)
+        keyboard = calendar.create_month_year_keyboard(year)
+        await call.message.edit_reply_markup(reply_markup=keyboard)
