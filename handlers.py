@@ -55,6 +55,8 @@ from collections import defaultdict
 from joke_parser import get_joke, get_joke_with_source
 from commands.joke import router as joke_router
 from aiogram_calendar import SimpleCalendar, get_user_locale
+from bybit_api import get_idr_usdt_rate
+from bybit_p2p import get_p2p_idr_usdt_avg_rate
 
 # Создаем роутер для всех обработчиков
 router = Router()
@@ -2464,16 +2466,16 @@ async def report_vsep_rate_input(message: Message, state: FSMContext):
             total_turnover[currency] = total_turnover.get(currency, 0) + tval
             total_commission[comm_currency] = total_commission.get(comm_currency, 0) + cval
             # Формат блока по проекту
-            lines.append(f"<b>{name}</b>\nКол-во сделок: <b>{count}</b>\nОборот: <b>{turnover}</b>\nКомиссия: <b>{commission}</b> (<code>{percent}</code>)\n")
+            lines.append(f"<b>{name}</b>\nКол-во сделок: <b>{count}</b>\nОборот: <b>{turnover}</b>\nУчастие: <b>{commission}</b> (<code>{percent}</code>)\n")
         print(f"[DEBUG] total_turnover: {total_turnover}")
         print(f"[DEBUG] total_commission: {total_commission}")
         # Итоги по валютам
-        lines.append("<b>Всего оборот:</b>")
+        lines.append("<b>Итог: Оборот</b>")
         for cur, val in total_turnover.items():
             # Форматируем в европейском стиле: пробелы как разделители тысяч, запятые как десятичные
             formatted = f"{val:,.2f}".replace(",", " ").replace(".", ",")
             lines.append(f"<b>{formatted} {cur}</b>")
-        lines.append("\n<b>Всего комиссия:</b>")
+        lines.append("\n<b>Итог: Участие</b>")
         for cur, val in total_commission.items():
             # Форматируем в европейском стиле: пробелы как разделители тысяч, запятые как десятичные
             formatted = f"{val:,.2f}".replace(",", " ").replace(".", ",")
@@ -2489,13 +2491,110 @@ async def report_vsep_rate_input(message: Message, state: FSMContext):
         # Форматируем в европейском стиле
         usdt_total_formatted = f"{usdt_total_sum:,.2f}".replace(",", " ").replace(".", ",")
         usdt_comm_formatted = f"{usdt_comm_sum:,.2f}".replace(",", " ").replace(".", ",")
-        lines.append(f"Всего оборот в USDT: <b>{usdt_total_formatted}</b>")
-        lines.append(f"Всего комиссия в USDT: <b>{usdt_comm_formatted}</b>")
+        lines.append(f"Оборот в USDT: <b>{usdt_total_formatted}</b>")
+        lines.append(f"Участие в USDT: <b>{usdt_comm_formatted}</b>")
         report_text = '\n'.join(lines)
         await message.reply(report_text, parse_mode="HTML")
     except Exception as e:
         await message.reply(f"❌ Ошибка при формировании отчёта: {e}")
     await state.clear()
+
+@router.callback_query(lambda c: c.data.startswith("use_bybit_rate_") or c.data == "enter_rate_manually")
+async def report_vsep_bybit_rate_choice(call: CallbackQuery, state: FSMContext):
+    if str(call.message.chat.id) != str(config.ADMIN_GROUP):
+        await call.answer("⛔️ Команда доступна только в чате админов.", show_alert=True)
+        await state.clear()
+        return
+    if not await is_admin_or_superadmin(call.from_user.id):
+        await call.answer("⛔️ Команда доступна только для админа и суперадмина.", show_alert=True)
+        await state.clear()
+        return
+    data = await state.get_data()
+    month = data.get("selected_month")
+    if call.data.startswith("use_bybit_rate_"):
+        # Пользователь выбрал использовать курс Bybit
+        rate = float(call.data.split("_")[-1])
+        await call.message.edit_text(f"⏳ Формирую отчёт за <b>{month}</b> по курсу <b>{rate:,.2f}</b>...", parse_mode="HTML")
+        # Дублируем логику из report_vsep_rate_input
+        try:
+            report_data = await asyncio.get_event_loop().run_in_executor(None, read_sum_all_report, month)
+            print(f"[DEBUG] report_data: {report_data}")
+            if not report_data:
+                await call.message.reply(f"❌ Нет данных за {month} на листе SUM_ALL.")
+                await state.clear()
+                return
+            # ... (оставить остальной код формирования отчёта без изменений)
+            # --- КОПИРУЕМ БЛОК ФОРМИРОВАНИЯ ОТЧЁТА из report_vsep_rate_input ---
+            lines = []
+            total_turnover = {}
+            total_commission = {}
+            import re
+            def parse_num(val, currency):
+                if not val:
+                    return 0.0
+                val = re.sub(r",", ".", str(val))
+                val = re.sub(r"\s", "", val)
+                if currency:
+                    val = val.replace(currency, "")
+                try:
+                    return float(val)
+                except Exception:
+                    m = re.search(r"([\d.]+)", val)
+                    return float(m.group(1)) if m else 0.0
+            for row in report_data:
+                name = row['project']
+                count = row['count']
+                turnover = row['turnover']
+                commission = row['commission']
+                percent = row['commission_percent']
+                currency = row['currency']
+                comm_currency = row['commission_currency']
+                if not currency:
+                    if 'SAL' in name.upper():
+                        currency = 'USDT'
+                    else:
+                        currency = 'IDR'
+                if not comm_currency:
+                    comm_currency = currency
+                tval = parse_num(turnover, currency)
+                cval = parse_num(commission, comm_currency)
+                print(f"[DEBUG] {name}: оборот={tval} {currency}, комиссия={cval} {comm_currency}")
+                total_turnover[currency] = total_turnover.get(currency, 0) + tval
+                total_commission[comm_currency] = total_commission.get(comm_currency, 0) + cval
+                lines.append(f"<b>{name}</b>\nКол-во сделок: <b>{count}</b>\nОборот: <b>{turnover}</b>\nУчастие: <b>{commission}</b> (<code>{percent}</code>)\n")
+            print(f"[DEBUG] total_turnover: {total_turnover}")
+            print(f"[DEBUG] total_commission: {total_commission}")
+            lines.append("<b>Итог: Оборот</b>")
+            for cur, val in total_turnover.items():
+                formatted = f"{val:,.2f}".replace(",", " ").replace(".", ",")
+                lines.append(f"<b>{formatted} {cur}</b>")
+            lines.append("\n<b>Итог: Участие</b>")
+            for cur, val in total_commission.items():
+                formatted = f"{val:,.2f}".replace(",", " ").replace(".", ",")
+                lines.append(f"<b>{formatted} {cur}</b>")
+            idr_total = total_turnover.get('IDR', 0)
+            idr_comm = total_commission.get('IDR', 0)
+            usdt_total = total_turnover.get('USDT', 0)
+            usdt_comm = total_commission.get('USDT', 0)
+            usdt_total_sum = usdt_total + (idr_total / rate if rate else 0)
+            usdt_comm_sum = usdt_comm + (idr_comm / rate if rate else 0)
+            lines.append(f"\n<b>Пересчёт по курсу {rate:,.2f}:</b>")
+            usdt_total_formatted = f"{usdt_total_sum:,.2f}".replace(",", " ").replace(".", ",")
+            usdt_comm_formatted = f"{usdt_comm_sum:,.2f}".replace(",", " ").replace(".", ",")
+            lines.append(f"Итог оборот в USDT: <b>{usdt_total_formatted}</b>")
+            lines.append(f"Итог участие в USDT: <b>{usdt_comm_formatted}</b>")
+            report_text = '\n'.join(lines)
+            await call.message.reply(report_text, parse_mode="HTML")
+        except Exception as e:
+            await call.message.reply(f"❌ Ошибка при формировании отчёта: {e}")
+        await state.clear()
+    else:
+        # Пользователь выбрал ввести курс вручную
+        await call.message.edit_text(
+            "💱 Введите курс IDR к USDT для пересчёта итогов (например: 16000)",
+            parse_mode="HTML"
+        )
+        await state.set_state(VsepReportStates.waiting_for_rate)
 
 def register_handlers(dp: Dispatcher):
     """Регистрация всех обработчиков"""
@@ -2986,15 +3085,32 @@ async def month_year_calendar_callback(call: CallbackQuery, state: FSMContext):
         # Месяц выбран, сохраняем данные
         year = data["year"]
         month = data["month"]
-        
-        # Формируем строку месяца в формате для Google Sheets (например: "июн.2025")
         months_short = calendar.months_short['ru_RU']
         month_name = months_short[month - 1]
         month_str = f"{month_name}{year}"
-        
         await state.update_data(selected_month=month_str)
+        # Пробуем получить курс с Bybit P2P
+        try:
+            rate = await get_p2p_idr_usdt_avg_rate()
+            if rate and rate > 0:
+                rate_str = f"{rate:,.2f}".replace(",", " ").replace(".", ",")
+                text = (
+                    f"📅 Выбран: <b>{calendar.months['ru_RU'][month-1]} {year}</b>\n\n"
+                    f"💱 Курс IDR→USDT с Bybit P2P: <b>{rate_str}</b>\n\n"
+                    f"Использовать этот курс?"
+                )
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Да", callback_data=f"use_bybit_rate_{rate}"),
+                        InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="enter_rate_manually")
+                    ]
+                ])
+                await call.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+                await state.set_state(VsepReportStates.waiting_for_rate)
+                return
+        except Exception as e:
+            print(f"[BYBIT P2P ERROR] {e}")
         await state.set_state(VsepReportStates.waiting_for_rate)
-        
         await call.message.edit_text(
             f"📅 Выбран: <b>{calendar.months['ru_RU'][month-1]} {year}</b>\n\n"
             f"💱 Введите курс IDR к USDT для пересчёта итогов (например: 16000)",
