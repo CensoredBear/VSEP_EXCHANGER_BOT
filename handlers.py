@@ -54,7 +54,6 @@ import json
 from collections import defaultdict
 from joke_parser import get_joke, get_joke_with_source
 from commands.joke import router as joke_router
-from aiogram_calendar import SimpleCalendar, get_user_locale
 from bybit_api import get_idr_usdt_rate
 from bybit_p2p import get_p2p_idr_usdt_avg_rate
 
