@@ -47,7 +47,10 @@ HELP_COMMANDS = {
         ("/joke", "Получить случайный анекдот"),
         ("/dice", "Бросить кубик"),
         ("/coin", "Подбросить монетку"),
-        ("/meme", "Получить случайный мем")
+        ("/meme", "Получить случайный мем"),
+        ("/order_show", "Показать информацию о заявке"),
+        ("/order_change", "Изменить статус заявки"),
+        ("/transfer", "Подтвердить перевод средств")
     ],
     "superadmin": [
         ("/start", "Запустить бота"),
@@ -123,6 +126,7 @@ def get_bot_commands_for_status(status: str) -> List[BotCommand]:
             BotCommand(command="report", description="Показать отчет"),
             BotCommand(command="status", description="Показать статус"),
             BotCommand(command="order_show", description="Показать заявку"),
+            BotCommand(command="order_change", description="Изменить статус заявки"),
             BotCommand(command="transfer", description="Перевод средств"),
             BotCommand(command="restart", description="Перезапустить бота"),
             BotCommand(command="reset_control", description="Сбросить счетчик контроля для текущего чата"),
@@ -155,6 +159,7 @@ def get_bot_commands_for_status(status: str) -> List[BotCommand]:
             BotCommand(command="report", description="Показать отчет"),
             BotCommand(command="status", description="Показать статус"),
             BotCommand(command="order_show", description="Показать заявку"),
+            BotCommand(command="order_change", description="Изменить статус заявки"),
             BotCommand(command="transfer", description="Перевод средств"),
             BotCommand(command="zombie", description="Оживить заявку из архива"),
             BotCommand(command="joke", description="Получить случайный анекдот"),
@@ -175,6 +180,8 @@ def get_bot_commands_for_status(status: str) -> List[BotCommand]:
             BotCommand(command="report", description="Показать отчет"),
             BotCommand(command="status", description="Показать статус"),
             BotCommand(command="order_show", description="Показать заявку"),
+            BotCommand(command="order_change", description="Изменить статус заявки"),
+            BotCommand(command="transfer", description="Перевод средств"),
             BotCommand(command="zombie", description="Оживить заявку из архива"),
             BotCommand(command="joke", description="Получить случайный анекдот"),
             BotCommand(command="dice", description="Бросить кубик"),
@@ -223,7 +230,9 @@ def build_pretty_help_text(status):
                   "✦ <code>/rate_show</code> - показать текущие курсы обмена\n"
                   "✦ <code>/rate_change</code> - сменить текущий основной курс\n"
                   "⁴⁰⁴<code>/rate_zone_change</code> - cменить зоны (интервалы) обмена\n"
-                  "⁴⁰⁴<code>/rate_coef_change</code> - сменить текущие коэффициенты курсов\n"),
+                  "⁴⁰⁴<code>/rate_coef_change</code> - сменить текущие коэффициенты курсов\n"
+                  "!!! предельная аккуратность при следующей команде:\n"
+                  "✦ <code>/order_change [order_number]</code> - изменить статус заявки\n"),
         ("superadmin", "<u><b>👮 + для супер админа:</b></u>\n"
                        "✦ <code>/admin_show</code> - показать всех админов сервиса\n"
                        "✦ <code>/admin_add</code> - добавить админа в сервис\n"

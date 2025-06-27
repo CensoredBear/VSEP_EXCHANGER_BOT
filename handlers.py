@@ -47,6 +47,7 @@ from commands.joke import router as joke_router
 from commands.dice import router as dice_router
 from commands.coin import router as coin_router
 from commands.meme import router as meme_router
+from commands.order_change import router as order_change_router
 import time
 import asyncio
 from aiogram.exceptions import TelegramBadRequest, TelegramMigrateToChat
@@ -2633,6 +2634,11 @@ def register_handlers(dp: Dispatcher):
     print("[DEBUG] register_handlers: подключаю meme роутер")
     dp.include_router(meme_router)
     print("[DEBUG] register_handlers: meme роутер подключен")
+    
+    # Подключаем роутер для команды order_change
+    print("[DEBUG] register_handlers: подключаю order_change роутер")
+    dp.include_router(order_change_router)
+    print("[DEBUG] register_handlers: order_change роутер подключен")
     
     # Регистрируем остальные callback обработчики напрямую в диспетчер
     dp.callback_query.register(force_open_callback, lambda c: c.data in ["force_open_yes", "force_open_no"])
