@@ -111,7 +111,7 @@ class Scheduler:
         """Отправка сообщения о начале смены"""
         try:
             # Обновляем системные настройки при начале смены
-            await system_settings.load_settings(db)
+            await system_settings.load()
             log_system("[SHIFT_START] Системные настройки обновлены")
             
             # Переводим все заказы со статусом created в timeout
