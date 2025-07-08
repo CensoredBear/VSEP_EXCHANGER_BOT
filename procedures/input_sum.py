@@ -171,6 +171,18 @@ async def handle_input_sum(message: TgMessage):
         if value < 0:
             msg = await get_night_shift_message(bali_time)
         else:
+            # Получаем время смены из system_settings
+            shift_start = system_settings.shift_start_time
+            shift_end = system_settings.shift_end_time
+            # Преобразуем в строку формата HH:MM
+            if isinstance(shift_start, str):
+                shift_start_str = shift_start[:5]
+            else:
+                shift_start_str = shift_start.strftime('%H:%M')
+            if isinstance(shift_end, str):
+                shift_end_str = shift_end[:5]
+            else:
+                shift_end_str = shift_end.strftime('%H:%M')
             msg = f"""
 Для оплаты заказа на:
                         🇮🇩 <b>{abs(idr_amount):,} IDR</b>
@@ -180,7 +192,7 @@ async def handle_input_sum(message: TgMessage):
 ➤ Карта: —
 ➤ Получатель: —
 ➤ СБП: —</blockquote>
-⚠️ Реквизиты выдаются с 09:00 до 23:00 по балийскому времени. Сейчас на Бали: {bali_time}
+⚠️ Реквизиты выдаются с {shift_start_str} до {shift_end_str} по балийскому времени. Сейчас на Бали: {bali_time}
 Расчет информационный, оплата невозможна."""
         
         # --- Проверка медиа для ночной смены ---
