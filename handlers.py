@@ -3164,7 +3164,7 @@ async def cmd_set_media_start(message: Message):
         return
     # Сохраняем в системные настройки
     value = {"id": media, "type": media_type}
-    await db.set_system_setting("media_start", str(value))
+    await db.set_system_setting("media_start", json.dumps(value))
     await system_settings.load()  # обновляем настройки в памяти
     await message.reply(f"✅ Медиа для начала смены сохранено!\nТип: {media_type}")
 
@@ -3198,6 +3198,6 @@ async def cmd_set_media_finish(message: Message):
         await message.reply("❗️Пожалуйста, прикрепите фото, видео или gif (анимацию) к команде или отправьте команду в ответ на сообщение с медиа.")
         return
     value = {"id": media, "type": media_type}
-    await db.set_system_setting("media_finish", str(value))
+    await db.set_system_setting("media_finish", json.dumps(value))
     await system_settings.load()
     await message.reply(f"✅ Медиа для окончания смены сохранено!\nТип: {media_type}")
