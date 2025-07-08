@@ -114,8 +114,8 @@ class Scheduler:
             await system_settings.load()
             log_system("[SHIFT_START] Системные настройки обновлены")
             
-            # Переводим все заказы со статусом created в timeout
-            await self.timeout_all_created_orders()
+            # Переводим все заказы со статусом created в timeout и получаем информацию
+            timeout_count, timeout_time = await self.timeout_all_created_orders()
             
             # Получаем список групп
             groups = await db.get_group_chats()
@@ -127,18 +127,23 @@ class Scheduler:
             night_shift = False
             try:
                 # --- Обнуляем все заказы со статусом created во всех чатах ---
-                await self.timeout_all_created_orders()
-                # --- конец обнуления ---
                 admin_group = config.ADMIN_GROUP
                 times = get_bali_and_msk_time_list()
                 today = times[6]  # дата и время по Бали
+
+                # Формируем информацию о переведенных заявках
+                timeout_info = ""
+                if timeout_count > 0:
+                    timeout_info = f"\n\n📋 <b>АРХИВАЦИЯ ЗАЯВОК:</b>\nПереведено {timeout_count} заявок в статус timeout (созданных до {timeout_time})"
+                elif timeout_count == 0:
+                    timeout_info = f"\n\n📋 <b>АРХИВАЦИЯ ЗАЯВОК:</b>\nНет заявок для перевода в timeout (созданных до {timeout_time})"
 
                 text = (
                     f"🟢 <b>СМЕНА ОТКРЫТА!</b> ✅\n"
                     f"Объединённый Сервис Обмена начинает свою работу.\n\n"
                     f"Балийское время: {today}\n"
                     f"Сегодня работаем до {self.shift_end}.\n\n"
-                    f"Желаю вам спокойной, продуктивной смены."
+                    f"Желаю вам спокойной, продуктивной смены.{timeout_info}"
                 )
                 admin_text = f'''{text}
 
@@ -181,26 +186,34 @@ class Scheduler:
             log_system(f"Ошибка при отправке сообщения о начале смены: {e}", level=logging.ERROR)
 
     async def timeout_all_created_orders(self):
-        """Переводит все заказы со статусом created в timeout"""
+        """Переводит все заказы со статусом created в timeout, созданные за 12 часов до начала смены"""
         try:
-            # Получаем все заказы со статусом created
+            # Вычисляем время "12 часов назад от начала смены"
+            now = datetime.now()
+            shift_start_datetime = datetime.combine(now.date(), self.shift_start)
+            timeout_threshold = shift_start_datetime - timedelta(hours=12)
+            
+            # Получаем все заказы со статусом created, созданные до порога времени
             orders = await db.pool.fetch(
-                'SELECT transaction_number FROM "VSEPExchanger"."transactions" WHERE status = $1',
-                'created'
+                'SELECT transaction_number FROM "VSEPExchanger"."transactions" WHERE status = $1 AND created_at < $2',
+                'created', timeout_threshold
             )
             
             if orders:
                 # Обновляем статус на timeout
                 await db.pool.execute(
-                    'UPDATE "VSEPExchanger"."transactions" SET status = $1, status_changed_at = $2 WHERE status = $3',
-                    'timeout', datetime.now(), 'created'
+                    'UPDATE "VSEPExchanger"."transactions" SET status = $1, status_changed_at = $2 WHERE status = $3 AND created_at < $4',
+                    'timeout', datetime.now(), 'created', timeout_threshold
                 )
-                log_system(f"[TIMEOUT] Переведено {len(orders)} заказов в статус timeout")
+                log_system(f"[TIMEOUT] Переведено {len(orders)} заказов в статус timeout (созданных до {timeout_threshold.strftime('%d.%m.%Y %H:%M')})")
+                return len(orders), timeout_threshold.strftime('%d.%m.%Y %H:%M')
             else:
-                log_system("[TIMEOUT] Нет заказов для перевода в timeout")
+                log_system(f"[TIMEOUT] Нет заказов для перевода в timeout (созданных до {timeout_threshold.strftime('%d.%m.%Y %H:%M')})")
+                return 0, timeout_threshold.strftime('%d.%m.%Y %H:%M')
                 
         except Exception as e:
             log_system(f"[TIMEOUT] Ошибка при переводе заказов в timeout: {e}", level=logging.ERROR)
+            return 0, "ошибка"
 
     async def update_shift_times(self):
         """Обновление времени начала и конца смены из базы"""
