@@ -3130,3 +3130,74 @@ async def month_year_calendar_callback(call: CallbackQuery, state: FSMContext):
         year = data.get("year", datetime.now().year)
         keyboard = calendar.create_month_year_keyboard(year)
         await call.message.edit_reply_markup(reply_markup=keyboard)
+
+@router.message(Command("set_media_start"))
+async def cmd_set_media_start(message: Message):
+    """Установить медиа для начала смены (фото/видео/анимация)"""
+    media = None
+    media_type = None
+    # Проверяем, есть ли медиа в reply
+    reply = message.reply_to_message
+    if reply:
+        if reply.photo:
+            media = reply.photo[-1].file_id
+            media_type = "photo"
+        elif reply.animation:
+            media = reply.animation.file_id
+            media_type = "animation"
+        elif reply.video:
+            media = reply.video.file_id
+            media_type = "video"
+    # Если нет в reply, ищем в самом сообщении
+    if not media:
+        if message.photo:
+            media = message.photo[-1].file_id
+            media_type = "photo"
+        elif message.animation:
+            media = message.animation.file_id
+            media_type = "animation"
+        elif message.video:
+            media = message.video.file_id
+            media_type = "video"
+    if not media:
+        await message.reply("❗️Пожалуйста, прикрепите фото, видео или gif (анимацию) к команде или отправьте команду в ответ на сообщение с медиа.")
+        return
+    # Сохраняем в системные настройки
+    value = {"id": media, "type": media_type}
+    await db.set_system_setting("media_start", str(value))
+    await system_settings.load()  # обновляем настройки в памяти
+    await message.reply(f"✅ Медиа для начала смены сохранено!\nТип: {media_type}")
+
+@router.message(Command("set_media_finish"))
+async def cmd_set_media_finish(message: Message):
+    """Установить медиа для окончания смены (фото/видео/анимация)"""
+    media = None
+    media_type = None
+    reply = message.reply_to_message
+    if reply:
+        if reply.photo:
+            media = reply.photo[-1].file_id
+            media_type = "photo"
+        elif reply.animation:
+            media = reply.animation.file_id
+            media_type = "animation"
+        elif reply.video:
+            media = reply.video.file_id
+            media_type = "video"
+    if not media:
+        if message.photo:
+            media = message.photo[-1].file_id
+            media_type = "photo"
+        elif message.animation:
+            media = message.animation.file_id
+            media_type = "animation"
+        elif message.video:
+            media = message.video.file_id
+            media_type = "video"
+    if not media:
+        await message.reply("❗️Пожалуйста, прикрепите фото, видео или gif (анимацию) к команде или отправьте команду в ответ на сообщение с медиа.")
+        return
+    value = {"id": media, "type": media_type}
+    await db.set_system_setting("media_finish", str(value))
+    await system_settings.load()
+    await message.reply(f"✅ Медиа для окончания смены сохранено!\nТип: {media_type}")
