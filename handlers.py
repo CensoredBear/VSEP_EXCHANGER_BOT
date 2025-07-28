@@ -579,12 +579,12 @@ async def control_callback_handler(call: CallbackQuery, state: FSMContext):
                         await call.answer(f"❌ Заявка уже имеет статус: {order['status']}", show_alert=True)
                         return
                     
-                    # Обновляем статус на "на контроле"
+                    # Обновляем статус на "на контроле" и сохраняем примечание
                     await conn.execute('''
                         UPDATE "VSEPExchanger"."transactions"
-                        SET status = 'control', status_changed_at = NOW()
+                        SET status = 'control', status_changed_at = NOW(), note = $2
                         WHERE transaction_number = $1
-                    ''', transaction_number)
+                    ''', transaction_number, crm_number)
                     
                     # Записываем в историю
                     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -621,7 +621,7 @@ async def control_callback_handler(call: CallbackQuery, state: FSMContext):
                         WHERE transaction_number = $1
                     ''', transaction_number, history)
                     
-                    log_func(f"Статус заявки {transaction_number} изменен: created -> control")
+                    log_func(f"Статус заявки {transaction_number} изменен: created -> control, note: '{crm_number}'")
                 
                 # Удаляем сообщение с кнопками
                 await call.message.delete()
@@ -1594,16 +1594,16 @@ async def cmd_transfer(message: Message):
         await db.update_transaction_history(transaction_number, history)
         
         # Подготавливаем данные для Google Sheets
-        # Формат: [transaction_number, user_nick, idr_amount, rub_amount, used_rate, status, note, acc_info, history, source_chat, now_str, transfer_dt]
+        # Формат: [transaction_number, user_nick, idr_amount, rub_amount, rate_used, status, note, account_info, history, source_chat, now_str, transfer_dt]
         gsheet_row = [
             transaction_number,
             user_nick,
             row['idr_amount'],
             row['rub_amount'],
-            transaction.get('used_rate', 0) if transaction else 0,
+            transaction.get('rate_used', 0) if transaction else 0,
             'accounted',
             transaction.get('note', '') if transaction else '',
-            transaction.get('acc_info', '') if transaction else '',
+            transaction.get('account_info', '') if transaction else '',
             history,
             str(chat_id),
             transaction.get('created_at', now_utc) if transaction else now_utc,

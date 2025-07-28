@@ -104,7 +104,7 @@ async def send_gsheet_summary(chat_id: str, result: GSheetWriteResult):
     """
     try:
         gs_logger.info(f"[GSheets] Попытка отправить итоговое сообщение в чат {chat_id}: {result.get_summary_message()}")
-        bot = Bot(token=config.BOT_TOKEN)
+        bot = Bot(token=str(config.BOT_TOKEN))
         message = result.get_summary_message()
         await bot.send_message(chat_id=chat_id, text=message)
         await bot.session.close()
@@ -171,7 +171,7 @@ async def write_multiple_to_google_sheet(
     await send_gsheet_summary(chat_id, write_result)
     # Если были успешные записи — отправляем финальное сообщение
     if write_result.success_count > 0:
-        bot = Bot(token=config.BOT_TOKEN)
+        bot = Bot(token=str(config.BOT_TOKEN))
         await bot.send_message(
             chat_id=chat_id,
             text="🟤 Заявки с произведённым расчётом добавлены в таблицу партнера"
@@ -207,7 +207,7 @@ def prepare_row_for_gsheet(row_data):
     M: чат id
     N: дата и время выполнения /transfer (строка)
     """
-    # row_data: [transaction_number, user_nick, idr_amount, rub_amount, used_rate, status, note, acc_info, history, source_chat, now_str]
+    # row_data: [transaction_number, user_nick, idr_amount, rub_amount, rate_used, status, note, account_info, history, source_chat, now_str]
     # Индексы:      0               1         2          3         4         5      6     7        8        9         10
     
     # Форматируем дату
